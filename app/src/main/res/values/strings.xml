@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">TGXCode</string>
+
+    <string name="fgs_special_use_justification">Maintains a persistent server-sent-events connection to the user\'s own Claude Code bridge running on their own machine. The bridge denies a permission prompt outright when no client is connected, so holding the connection is the feature: it is what lets the user answer a blocked coding session from their phone.</string>
+
+    <!-- Notification channels -->
+    <string name="channel_asks_name">Permission requests</string>
+    <string name="channel_asks_desc">A session is blocked waiting for your answer.</string>
+    <string name="channel_connection_name">Background connection</string>
+    <string name="channel_connection_desc">The ongoing notice that TGXCode is holding a connection to the bridge.</string>
+    <string name="channel_activity_name">Session activity</string>
+    <string name="channel_activity_desc">Turn errors, warnings, and messages that failed to send.</string>
+</resources>

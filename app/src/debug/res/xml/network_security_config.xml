@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug overlay. Same filename as the main source set, so it replaces it in the
+  debug variant only.
+
+  Note: this config matches HOSTNAMES, not CIDR ranges. `10.11.64.0/24` is not
+  expressible, which is why the LAN address is listed as a literal and why the
+  .ts.net name — which survives a DHCP move — is the one to prefer.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <!--
+          The best inner loop: `adb reverse tcp:45888 tcp:45888` makes the phone's
+          own loopback reach the bridge over the adb transport. No LAN reachability
+          needed, no DHCP churn, and the bridge stays bound to 127.0.0.1.
+        -->
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- The emulator's view of host loopback, if one is ever used. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- The WSL/Windows host on the LAN. Edit when DHCP moves it. -->
+        <domain includeSubdomains="false">10.11.64.43</domain>
+        <!-- The tailnet over plain HTTP, i.e. `tailscale serve` with an http port. -->
+        <domain includeSubdomains="true">taild5c420.ts.net</domain>
+    </domain-config>
+</network-security-config>

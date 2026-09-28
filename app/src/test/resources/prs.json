@@ -1,0 +1,595 @@
+{
+    "sessions": {
+        "8b3eb178-f92c-42c7-8ef3-1b866cc040b1": {
+            "status": "open",
+            "label": "open",
+            "total": 1,
+            "counts": {
+                "open": 1
+            }
+        },
+        "3f995c5e-da48-4fd9-bfbc-73489f892813": {
+            "status": "open",
+            "label": "open",
+            "total": 1,
+            "counts": {
+                "open": 1
+            }
+        },
+        "3ab0173b-ac84-4884-9275-3b529e6f5322": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "a3534c5d-458f-4343-ba31-b684befd3c9a": {
+            "status": "open",
+            "label": "open",
+            "total": 1,
+            "counts": {
+                "open": 1
+            }
+        },
+        "e1ad854b-56ce-4400-8e2c-f5b19f79a6fa": {
+            "status": "open",
+            "label": "open",
+            "total": 1,
+            "counts": {
+                "open": 1
+            }
+        },
+        "8678949f-8515-4375-82ca-9563574dbe6a": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "db1f86b6-d53c-4f06-81c5-0eb17fbce610": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "264c1e22-c799-47ad-81ec-fa1a528f7ee1": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "5e265336-35e5-4482-aba2-65bcaa010cdc": {
+            "status": "open",
+            "label": "open",
+            "total": 1,
+            "counts": {
+                "open": 1
+            }
+        },
+        "885e348d-2787-4a17-afbd-9601ec036d65": {
+            "status": "open",
+            "label": "open",
+            "total": 1,
+            "counts": {
+                "open": 1
+            }
+        },
+        "1f8958a4-baec-4b1c-ac9a-868ed5e2e4aa": {
+            "status": "open",
+            "label": "open",
+            "total": 1,
+            "counts": {
+                "open": 1
+            }
+        },
+        "ec49a71d-0b59-4557-9441-b1e2bea25183": {
+            "status": "open",
+            "label": "open",
+            "total": 1,
+            "counts": {
+                "open": 1
+            }
+        },
+        "b39f493b-c2a5-48ba-a332-ea2c06e262ed": {
+            "status": "conflicting",
+            "label": "conflicts with the base branch",
+            "total": 1,
+            "counts": {
+                "conflicting": 1
+            }
+        },
+        "fb4c3016-a7c7-44c0-a911-10be38688260": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "53e788d1-7760-45d6-9aba-b6b6a462b361": {
+            "status": "merged",
+            "label": "merged",
+            "total": 3,
+            "counts": {
+                "merged": 3
+            }
+        },
+        "37b7d296-92ac-4232-b026-b366be8b3e55": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "c2d12f2b-b0b0-428c-9f7a-478991202446": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "8c66011f-e56b-4d8d-8595-2cb6cb3a5a6a": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "cc8461e3-7cd5-4b75-bca9-52828a8dce4d": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "57cd0784-b5ee-4c51-80f2-16a79cc12cc0": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "6e126520-54e4-4bd5-99a5-7a0b243619bf": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "708271cc-ea50-4415-8630-0c7eeca98463": {
+            "status": "open",
+            "label": "open",
+            "total": 4,
+            "counts": {
+                "merged": 3,
+                "open": 1
+            }
+        },
+        "e3bca8e0-3b9c-44fa-8e21-90dc7319b476": {
+            "status": "merged",
+            "label": "merged",
+            "total": 3,
+            "counts": {
+                "merged": 3
+            }
+        },
+        "e1ef1cf2-0c16-4fcd-b7d6-efbb93c4b9b7": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "f96b72da-f76f-4972-a5c9-2f1121a97b6b": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "1a0548c5-090f-4cee-8318-b0a3430eed34": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "2f633c8f-4fb1-42e7-aca2-bb2733ef6384": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "972cecee-5c07-4eac-a3d1-976893275809": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "7c2dd7a4-3d89-4650-b552-28b95a0bebe0": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "94425bff-f774-41bc-9dd5-949387fb9b5d": {
+            "status": "closed",
+            "label": "closed without merging",
+            "total": 4,
+            "counts": {
+                "merged": 3,
+                "closed": 1
+            }
+        },
+        "dfeffb9d-9234-455a-8de0-7d3ed6359ac0": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "c7e0b197-f092-4645-a936-c2c356f1929d": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "034f319c-7876-47da-9aa3-6f9e49464816": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "698ee378-d30c-4449-bc9f-c9fe47e7f3c8": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "3b9f958a-7cd2-496e-8cbb-54b1f6ab0306": {
+            "status": "conflicting",
+            "label": "conflicts with the base branch",
+            "total": 1,
+            "counts": {
+                "conflicting": 1
+            }
+        },
+        "a99dcdc8-cec4-40f2-8798-33127a113ab5": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "be828fe4-f5cb-4486-98d5-75573503fab4": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "ad791c16-0840-4d99-bfdb-c953e0bf55f1": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "d14de125-ecd9-46f8-93f4-6af7bfdcd37b": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "3c6a9d04-8756-450e-b054-8d98cac6b597": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "19ee2c56-0493-43a6-af7e-61b6cd1ef08f": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "3b87a52f-16ef-48fc-bd72-ade45f9424e4": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "ffe8611c-6a42-4059-92c5-0dcae58e5939": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "d1e5b3d1-16a2-4f98-9adf-27acbf4ad26b": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "513566d2-3778-48e1-8131-22dc881b9722": {
+            "status": "draft",
+            "label": "draft",
+            "total": 1,
+            "counts": {
+                "draft": 1
+            }
+        },
+        "dcd41a6f-1bb1-470b-895b-f7a22d56ebad": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "74ba832a-41e2-4b8a-929e-c9dc7229d29c": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "9441649e-5633-4887-9a81-f4970974e7a3": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "3821d5aa-4f6b-4f4e-a636-8ec86ca9a454": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "b35d893c-8872-46c8-908a-368b25ef3fa3": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "3f704ed1-ebab-446c-9cea-2295ae072c08": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "0e6f75cf-9716-48aa-888d-8c2c6f55a8f8": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "4d06179e-115d-4802-8cf5-9e13731ba32a": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "ff6b16c5-ae7b-4714-80d0-07c5da6b3d77": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "9fb989fe-2949-427f-b0be-6caaab2c7917": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "191efb49-fcf6-4e85-a787-2ad481e1d7d9": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "97881955-872f-4320-9b05-8dcfd99bb88a": {
+            "status": "merged",
+            "label": "merged",
+            "total": 3,
+            "counts": {
+                "merged": 3
+            }
+        },
+        "357e3ae6-b499-4695-a051-30931432b80d": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "cb6348f7-b1dd-47a5-89a5-093b8008e399": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "0dd0515c-18da-45fe-88df-6b05aa942ab6": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "49cb3130-aae7-49a1-8ed4-9ac485437cfb": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "60977da7-d748-40d6-9263-815626813ef0": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "784215ff-9989-40fe-ac0e-9598e80a4d3a": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "7cf08e95-c599-4296-8cf3-d1bb271beb87": {
+            "status": "merged",
+            "label": "merged",
+            "total": 3,
+            "counts": {
+                "merged": 3
+            }
+        },
+        "488ed80d-db26-4f12-9335-7e0d117fa66b": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "004c7e5a-804f-47a2-94cd-8d60bbed286c": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "9049a208-886a-4047-ae12-1ed3c633d6f6": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "6ddd4165-523f-4ee8-bd6f-d21b127cbb8e": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "7894fd92-f4f8-4fe5-9b3d-c82beb1283a6": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "3f4edaf4-2ea0-4e8f-be8d-e24617e40425": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        },
+        "142e2b5e-fac0-45eb-b51d-739385dac741": {
+            "status": "draft",
+            "label": "draft",
+            "total": 1,
+            "counts": {
+                "draft": 1
+            }
+        },
+        "e2ae84c4-21ec-46cc-8c2a-f1274efdabe2": {
+            "status": "merged",
+            "label": "merged",
+            "total": 2,
+            "counts": {
+                "merged": 2
+            }
+        },
+        "8b06f4f8-646b-4807-92fc-c5cc36bae73a": {
+            "status": "merged",
+            "label": "merged",
+            "total": 1,
+            "counts": {
+                "merged": 1
+            }
+        }
+    },
+    "gh": {
+        "ok": true,
+        "error": null
+    },
+    "checkedAt": "2026-09-07T15:16:33.099Z"
+}

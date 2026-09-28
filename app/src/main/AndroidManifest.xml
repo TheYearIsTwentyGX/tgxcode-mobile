@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      Android 16's Local Network Protections will gate a direct socket to an RFC1918
+      address (the dev bridge on the LAN) behind this permission. Declared now, and
+      requested lazily only when the active profile's host is a private literal — the
+      Tailscale origin is the primary path and needs none of it.
+    -->
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
+    <application
+        android:name=".TgxApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.TGXCode">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:enableOnBackInvokedCallback="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.TGXCode">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              Pairing by sharing the link from the browser. This is the path that
+              actually works today on every Android version: open the pairing URL in
+              the phone's browser, then Share -> TGXCode.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!--
+              App Links for the pairing URL, one host per origin the bridge is
+              reachable on. autoVerify is required on Android 12+ — an unverified
+              https filter is simply ignored and the link goes to the browser.
+              Verification needs /.well-known/assetlinks.json served by the bridge,
+              which is still a 404 on both origins, so this lies dormant until it
+              is not.
+
+              Exact hosts, not `*.ts.net`. Digital Asset Links verifies per host and
+              has no wildcard form, so a wildcard filter could never verify however
+              many static files upstream served — it was dormant twice over.
+              Verification is also per host from Android 12 on, so one host failing
+              does not take the other down with it.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- The Cloudflare tunnel. Apex only; www.tgxcode.com does not resolve. -->
+                <data
+                    android:scheme="https"
+                    android:host="tgxcode.com"
+                    android:pathPrefix="/pair" />
+                <!-- `tailscale serve`. -->
+                <data
+                    android:scheme="https"
+                    android:host="tg-dylanh.taild5c420.ts.net"
+                    android:pathPrefix="/pair" />
+            </intent-filter>
+
+            <!-- Notification deep link into a conversation. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tgxcode" android:host="session" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          specialUse, not dataSync. dataSync is capped at 6 hours per 24 on Android
+          15+, after which the system stops the service and will not let it restart
+          until the app is foregrounded — which is exactly when the feature stops
+          mattering. dataSync also cannot be started from BOOT_COMPLETED at API 35+.
+          specialUse costs a Play Store review of the justification below, which does
+          not apply to an app installed over adb.
+        -->
+        <service
+            android:name=".service.BridgeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="@string/fgs_special_use_justification" />
+        </service>
+
+        <receiver
+            android:name=".service.AskActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

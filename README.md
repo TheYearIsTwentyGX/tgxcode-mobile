@@ -1,0 +1,427 @@
+# TGXCode
+
+A native Android client for the [claude-sessions](../claude-sessions) bridge.
+
+It is the third client of that bridge, alongside the desktop web UI and the phone
+web UI at `/m`. It reimplements the phone surface natively — same screens, same
+decisions, same colours — because there is one thing a web page structurally cannot
+do, and it happens to be the important one:
+
+> `pool.hasViewer = () => clients.size > 0`. With no SSE client attached, an ask is
+> **denied immediately** — there is nobody to ask.
+> — `claude-sessions/docs/api.md`
+
+A backgrounded browser tab is not reliably alive; `web/mobile.js` even tears its own
+`EventSource` down on `visibilitychange`. So the moment the phone goes in a pocket,
+sessions that ask for permission get auto-denied. A native app can hold the socket,
+which means it needs no push infrastructure at all — **the app is the push channel**.
+
+This project adds no code to `claude-sessions`. Anything it needs and cannot get from
+`docs/api.md` is a gap in that contract, to be raised there rather than worked around
+here.
+
+## Setting up the toolchain
+
+WSL starts with no JDK, no Android SDK and no Gradle. Everything below is native to
+WSL — the build never crosses `/mnt/c`, which is 10–50× slower for the many-small-file
+access that `aapt2` and `d8` do.
+
+```bash
+# JDK 21 (matches Android Studio's bundled JBR; required by Gradle 9 / AGP 9).
+# A .tar.gz, so the missing `unzip` never comes up.
+mkdir -p ~/.local/jdk && cd ~/.local/jdk
+curl -fL -o t.tar.gz "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jdk/hotspot/normal/eclipse"
+tar xzf t.tar.gz && rm t.tar.gz
+
+# Android SDK. commandlinetools IS a zip — python3 has an extractor.
+export ANDROID_HOME="$HOME/Android/Sdk"
+mkdir -p "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/licenses" && cd /tmp
+curl -fLO https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip
+python3 -m zipfile -e commandlinetools-linux-*.zip "$ANDROID_HOME/cmdline-tools/"
+mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+# python3 -m zipfile does NOT preserve the executable bit.
+chmod +x "$ANDROID_HOME/cmdline-tools/latest/bin/"*
+# Licences are already accepted on the Windows side; copying skips the prompt.
+cp "/mnt/c/Users/Dylan Hays/AppData/Local/Android/Sdk/licenses/android-sdk-license" \
+   "$ANDROID_HOME/licenses/"
+sdkmanager --sdk_root="$ANDROID_HOME" \
+    "platform-tools" "platforms;android-37.1" "build-tools;37.0.0"
+```
+
+Then, in the project:
+
+```bash
+. ./env.sh          # JAVA_HOME, ANDROID_HOME, PATH — project-local, not ~/.bashrc
+./gradlew assembleDebug
+```
+
+`local.properties` (gitignored) carries `sdk.dir`.
+
+## Getting it onto the phone
+
+WSL runs in `networkingMode=mirrored`, so it sits directly on the LAN and the Linux
+`adb` reaches the phone with no `/mnt/c` APK shuffling.
+
+```bash
+# Phone: Settings -> Developer options -> Wireless debugging -> Pair device with pairing code
+adb mdns services                         # finds both ports; mDNS works from WSL
+adb pair 10.11.64.40:<pairing-port> <6-digit code>
+adb connect 10.11.64.40:<connect-port>    # a DIFFERENT port from the pairing one
+./gradlew installDebug
+```
+
+Two things to expect. The pairing port and the connect port differ and both change
+whenever Wireless debugging is toggled. And pairing is bound to the adb server's key
+(`~/.android/adbkey`) — pairing from Windows `adb.exe` does not pair the Linux one.
+
+If the Windows adb server has grabbed the device, `adb.exe kill-server` on that side.
+
+## Pointing it at a bridge
+
+The app skips the `/pair` cookie handshake entirely — `docs/api.md` says a native
+client should store the token and send `Authorization: Bearer`. Pairing is therefore
+just "get the token onto the device", and the friendliest way is to paste the whole
+pairing link the desktop already generates.
+
+Three ways in, all landing on the Settings form so the origin is visible before it is
+trusted:
+
+- **Paste** the link into the first field.
+- **Share** it from the phone's browser (`ACTION_SEND`) — the path that works on every
+  Android version today.
+- An **App Link** on `/pair`, one exact host per origin, which lies dormant until the
+  bridge serves `/.well-known/assetlinks.json` (still a 404 on both). Worth one static
+  file upstream. It used to name `*.ts.net`, which was dormant twice over: Digital Asset
+  Links verifies per host and has no wildcard form, so that filter could never have
+  verified however many files upstream served.
+
+Three origins are useful:
+
+| Origin | When |
+|---|---|
+| `https://tgxcode.com` | **No VPN needed.** A named Cloudflare tunnel (`cloudflared` as a systemd service in WSL) with a real Let's Encrypt cert, so it works from any network without Tailscale installed. Classed **remote**, same as below. Measured: `hello` at 0.29s, 36 chunks in 75s — it carries SSE perfectly well. |
+| `https://tg-dylanh.taild5c420.ts.net` | `tailscale serve` fronts 45888 with a Let's Encrypt cert, so no cleartext exception is needed and it works away from the desk — as long as the Tailscale app is running on the phone. The bridge classes it as **remote**, so `bypassPermissions`/`dontAsk` are dropped and terminals are refused — correct, and the app agrees rather than pretending. |
+| `http://127.0.0.1:45888` + `adb reverse tcp:45888 tcp:45888` | The dev loop. The phone's own loopback reaches the bridge over the adb transport, so the bridge stays bound to 127.0.0.1 and nothing needs LAN reachability. |
+
+Only the loopback row needs a cleartext exception. Both HTTPS origins have publicly
+trusted certs, so release builds reach them with no network-security config at all.
+
+Release builds permit **no cleartext at all**; the debug variant overlays
+`app/src/debug/res/xml/network_security_config.xml` with a short allowlist. That has to
+be a source-set overlay — `<debug-overrides>` configures trust anchors only and cannot
+enable cleartext.
+
+## Staying connected in the background
+
+Off by default, behind a toggle in Settings, because holding a socket open costs
+battery and the user should opt into it knowing what it buys them.
+
+When on, a foreground service takes a second lease on the *same* connection — the
+bridge still sees one client, not two — and turns asks into notifications.
+
+**Why `specialUse` and not `dataSync`.** `dataSync` is the semantic near-fit, but on
+Android 15+ it is capped at six hours per 24, and the quota only refills when the app
+is brought to the foreground. That defeats the exact case this exists for: a phone on
+a table overnight. It also cannot be started from `BOOT_COMPLETED` at API 35+.
+`specialUse` costs a Play Store review of the declared justification, which does not
+apply to an app installed over adb. `onTimeout()` is implemented anyway as insurance.
+
+Which asks can be answered without opening the app:
+
+| Kind | Inline actions | Why |
+|---|---|---|
+| tool | **Allow**, **Deny** | `{requestId, decision}` is the complete answer; there is nothing to read first. |
+| plan | **Keep planning** only | An *approve* must carry `mode`, or it agrees to the work and then blocks every edit in it. A deny needs no mode and is always safe. |
+| question | none | Answers are keyed by exact question text and cannot fit on a notification. |
+
+Three things have to agree about whether a notification should still exist, and the
+third is the one that is easy to miss:
+
+1. `permission-request` raises it.
+2. `permission-resolved` cancels it — somebody answered at the desk.
+3. **Reconnect reconciliation.** Nothing replays, so a resolution that fired into a
+   closed socket is gone forever. After every board refresh, any notification the
+   board no longer lists as blocked is cancelled. Without this, a phone that lost
+   signal for ten minutes offers to allow something decided long ago — worse than no
+   notification at all.
+
+The `PendingIntent` trap worth naming: **its equality ignores extras**, and two asks
+in one session share a notification id, so a reused intent would answer the
+*previous* `requestId`. Each action uses `requestCode = (requestId + decision).hashCode()`
+with `FLAG_UPDATE_CURRENT`.
+
+## When the network will not carry a stream
+
+SSE is best-effort; polling is the guaranteed path. Some transports buffer server-sent
+events instead of passing them through, and the failure is **silent**: HTTP 200, the
+right `Content-Type`, and then nothing at all until the connection closes. Measured on
+`/api/events` against the same bridge:
+
+| | Loopback | Named tunnel (`tgxcode.com`) | Quick tunnel (`*.trycloudflare.com`) |
+|---|---|---|---|
+| `hello` arrives | 0.04s | 0.29s | **never** |
+| Pings at 25s/50s | on time | on time | never |
+| Chunks in ~75s | 9 | 36 | **0** |
+
+Cloudflare strips the `X-Accel-Buffering: no` header the bridge sets, so there is no
+header or config that fixes it from either end.
+
+**`hello` is the only way to detect it.** The bridge writes it the instant the stream
+opens, before the ping timer even exists, so on any transport that works it lands in
+well under a second. Silence cannot be used instead: `: ping` is an SSE *comment* and
+`okhttp-sse` discards it without a callback, so an idle-but-healthy stream is
+indistinguishable from a dead one. The decision is therefore made once, up front, on a
+6s timeout — never by watching for silence later.
+
+After that the app polls the delta routes the API already has: `GET /api/overview` for
+the board every 5s, `GET /api/sessions/:id?tail=0` for liveness and
+`GET /api/sessions/:id/since?offset=` for new events every 2.5s. Through the same tunnel
+those measured ~62ms and 7KB for the board and **42 bytes** for an empty delta, so the
+only real cost is that liveness becomes a couple of seconds granular instead of instant
+— which for "has it finished, does it need me" is a distinction without a difference.
+
+The connection dot becomes a **ring** rather than a filled circle, with a banner saying
+the network will not carry a live stream, because an unexplained two-second lag reads as
+a broken app.
+
+**`?tail=0` needs a bridge on post-#31 `main`.** It landed in that PR; before it, the
+guard was `want > 0`, under which `tail=0` falls through to a *full* read — the entire
+transcript, no `truncated`, which polled every 2.5s is half a megabyte a tick and the
+most expensive call on the route rather than the cheapest. Restart the everyday bridge
+after pulling. Verify the shape against a dev bridge rather than 45888, as that repo's
+CLAUDE.md asks.
+
+### The socket is held open anyway, and that is the whole trick
+
+`web/mobile.js` closes its `EventSource` before it starts polling. Doing that here would
+have cost the app the one thing it exists for.
+
+`clients.set(id, client)` happens at `bridge/server.js:813`, the instant `/api/events` is
+handled and **before** the client has read a byte — the buffering is in Cloudflare,
+downstream of the origin. So on a buffering transport the bridge still counts us as a
+connected client and `pool.hasViewer()` is still true. Close that socket and `dropClient`
+fires, `clients.size` goes to 0, and `bridge/runner.js:734` auto-denies every ask
+immediately. The app would hold a perfectly current board and transcript while silently
+losing every permission request.
+
+So the stream stays open purely to be counted, and everything is read by polling. Two
+consequences worth naming:
+
+- The held socket uses `readTimeout(0)`, deliberately undoing the 40s dead-peer detector
+  that the ordinary stream client argues for at length. On a buffering transport zero
+  bytes is the *expected* steady state, so that timeout would close the load-bearing
+  socket every 40 seconds. The poll replaces it as the liveness check, and notices a
+  failure in 2.5s rather than 40.
+- Backoff resets on the socket *opening* rather than on `hello`, which never comes.
+  Otherwise every network blip would climb to the 30s ceiling while the socket is the
+  only thing keeping asks answerable.
+
+**Polling is not gated on the app being foregrounded.** `web/mobile.js` returns early
+when its tab is hidden; copying that would undo the reason this app exists, since a phone
+in a pocket is exactly when nobody is at the desk to answer instead.
+
+Two smaller divergences, both because this client has surfaces `/m` does not: the
+sessions list and the task badge get a slower 20s tier of their own (they normally ride
+on `sessions-changed`, and nothing pushes in this mode), and the board is compared with
+`at` nulled out before it is published, because `at` is the time the payload was built
+and changes on every read — keying on it would rebuild the Sessions list under the
+reader's thumb every few seconds. Recovery from the sticky decision is also better than
+`/m`'s, which needs a page reload: changing the origin re-tests the transport, since a
+different origin is genuinely a different question.
+
+Reproducing a buffering transport takes one command and touches no bridge code:
+
+```bash
+cloudflared tunnel --url http://localhost:45888    # a *.trycloudflare.com origin
+```
+
+`PollingFallbackTest` covers the same ground without a network, using MockWebServer's
+`bodyDelay` to hold a `text/event-stream` body open — which is exactly what the quick
+tunnel does.
+
+## Debugging a long-lived socket
+
+```bash
+adb logcat -s TGXCode:V
+```
+
+One tag for the whole app. A connection that reconnects on its own is close to
+undebuggable without it — "it says offline" is not something you can act on. The log
+covers lease acquisition, every `/api/events` attempt, `hello`, stream closures with
+their cause, non-2xx responses, and the pairing probe's verdict.
+
+The line that matters most on a new network is the watchdog's:
+
+```
+no hello in 6000ms — this transport is buffering the stream; polling instead
+```
+
+Its absence is the confirmation that the transport carries SSE. Every `/api/events`
+attempt also logs `held=true|false`, which says which mode the socket is in.
+
+## Things found while building this
+
+Verified against the live bridge, and worth reporting upstream:
+
+1. **`X-Claude-Sessions-Client: 1` is mandatory on every non-GET `/api/` route**
+   *(Since closed: documented in `docs/api.md`, and renamed `X-TGXCode-Client` with
+   the old name still accepted. `BridgeClients.kt` sends both.)*
+   (`bridge/server.js:287`) — a CSRF guard that is not in `docs/api.md`. Without it
+   the entire write surface 403s: subscribe, send, permission, create.
+2. **`user.command` is an object**, `{name, args}`, not a string
+   (`bridge/transcript.js:590`). `web/mobile.js:715` interpolates it into a template
+   string, so a slash command renders there as `/[object Object]`.
+3. **`stripEnvelope` does not strip the `<command-*>` tags**, so a slash-command user
+   message is *entirely* bookkeeping XML in `text`. This client strips them and falls
+   back to the parsed command.
+4. **`result.patch` is a structured diff**, an array of hunks with pre-prefixed lines —
+   `docs/api.md` lists it beside `text` and `stdout` as though it were another string.
+5. **`/api/sessions` never includes `runner.pendingPermission`** (only
+   `{state, activity, queued}`), so `mobile.js:525`'s ask branch can never fire and the
+   web client's Sessions rows never show the ask dot. This client cross-references the
+   board, which it already holds for the tab badge.
+6. **`web/sw.js:54` answers a plan ask with no `mode`** — precisely what `docs/api.md`
+   says is wrong, since the session is *in* plan mode while the card is up.
+7. **`web/mobile.js` drops the `tool-result` event**, and this one is not cosmetic.
+   `bridge/transcript.js:485` says it plainly — *"The call itself was in an earlier
+   chunk — this happens on every live tail. Emit a patch the client applies to the
+   tool block it already rendered."* `web/app.js:970` handles it; the phone client has
+   no case for it, so its `default: return null` swallows it. A full transcript read
+   merges results into the `tool` event, which is why an already-finished session
+   looks fine — but **while you watch a session live, every tool keeps its spinner and
+   never resolves.**
+8. **Two more "documented as a string, sent as an object"**: `tool.agent` is a
+   subagent descriptor (`{agentId, agentType, description, spawnDepth, …}`), and the
+   send/create responses' `status` is a whole runner status. With `user.command` and
+   `result.patch` that makes four, which is enough to suggest `docs/api.md`'s event
+   table would benefit from types rather than field names.
+9. **`web/mobile.js` has no suggestion, drafts or task surface at all**, so a
+   follow-up an agent files is invisible from a phone browser unless you happen to have
+   the conversation that raised it open. `renderSuggestion` draws the event; nothing
+   collects them.
+10. **A polling client is not a viewer, so falling back re-arms auto-deny.** The new
+    "SSE is best-effort" section tells a client to fall back to polling, but not that
+    dropping the stream removes it from `clients` — making `pool.hasViewer()` false and
+    auto-denying every ask (`bridge/runner.js:734`). `web/mobile.js` closes its
+    `EventSource` before `startPolling()`, so on a buffering transport `/m` loses every
+    ask while looking healthy. Because the bridge registers the client at
+    `bridge/server.js:813` before the first byte is read, holding the buffered socket
+    keeps `hasViewer()` true, which is what this app does. But holding a socket that will
+    never deliver anything is a workaround: the real fix is upstream, letting a polling
+    client register as a viewer.
+11. **`?tail=0` is documented in the wrong place.** PR #31 implemented it and explains it
+    thoroughly in `bridge/server.js`, but the only mention in `docs/api.md` is inside the
+    live-channel polling section. The `?tail=N` paragraph — where an implementer looks
+    when building the call — still says only "returns only the last N events and adds
+    `truncated`", from which `N=0` reads as "no limit" rather than "none of them". What it
+    actually returns (`events: []`, `truncated`, the *same* `offset` as a full read, the
+    full `runner` including `pendingPermission`) is pinned by `test/gate.test.js` and
+    written down nowhere a client would find it.
+12. **A `tail=0` response reports `truncated: {dropped: total, total}`.** Literally true,
+    and misleading for the liveness call it was added for: a client that merges the
+    response into an open conversation shows "N earlier events — load all" over a
+    transcript it already holds, claiming every event is missing. Worth saying that only
+    `runner` and `offset` should be read from a liveness read.
+13. **The polling advice assumes a foreground tab.** `/m` gates its poll on
+    `visibilityState`, and `docs/api.md` inherits the assumption. A client that has to
+    stay answerable while backgrounded has no such gate, and the standing cost — a 7KB
+    board GET every 5s, indefinitely — belongs beside the 62ms and 42-byte figures.
+14. **A newly created session is not readable for ~3.5s.** `POST /api/sessions` returns
+    a `sessionId` as soon as the process spawns, but `GET /api/sessions/:id` 404s until
+    Claude Code has written its transcript. Navigating straight to the id — the obvious
+    thing to do, and what this app did — reports "session not found" about a session
+    being created perfectly well. Worth a sentence in `docs/api.md` under
+    `POST /api/sessions`.
+
+## Two surfaces `/m` does not have
+
+`/m` has no task board and no drafts, and renders a `suggestion` only as a row inside
+the conversation that raised it. So these two are not ports of anything — the shape is
+this client's to choose, and both are chosen for a phone rather than shrunk from a desk.
+
+**Tasks.** Suggested follow-ups: work an agent noticed but was not asked to do. The
+desktop shows them in a panel beside the transcript *and* as a column on its task board;
+neither fits here, so they get a tab, and the conversation still draws its own inline
+where you meet an offer while it is being made. Starting one uses `plan`, as
+`web/app.js:2004` does, and for the reason that matters: an agent-written prompt has had
+no human read it as an instruction.
+
+The chips — Open, Started, Dismissed — exist for one reason. **Undo needs somewhere to
+happen.** A dismissed task is gone from the default view by definition, so without a way
+to look at the dismissed ones, "dismiss" would be irreversible in practice however
+reversible the bridge makes it.
+
+**Drafts**, on the New tab rather than a board of their own. A draft *is* the body of
+that form (`docs/api.md:695`), so a saved one is that screen with its fields already
+filled; a list anywhere else would be a second place claiming to be where a session is
+set up. `docs/api.md:121` names the case it exists for — *"setting work up at the desk
+and releasing it from a phone when quota frees up"* — and this is the releasing half.
+
+One thing worth knowing about the edit path. The phone has no model picker and no title
+field, so `PATCH /api/drafts/:id` is sent **without `model` and without `title`**. The
+route is a genuine partial, so omitting them preserves whatever was set at the desk;
+sending them as nulls would silently clear both on every phone edit, which is the kind of
+data loss nobody notices until a session starts on the wrong model. Verified against the
+live bridge, and covered by `DraftDecodeTest`.
+
+`GET /api/taskboard` is deliberately unused. Its `suggested` column is
+`GET /api/suggestions?status=open` verbatim, and its other three are a second answer to
+what the Sessions tab already says — so subscribing to its push would send several
+hundred cards every three seconds to keep one column fresh. The cost is that a newly
+filed task is not pushed; `docs/api.md:855` names the substitute, and this client refetches
+on `sessions-changed`, on `suggestion-changed`, on `hello` and on pull-to-refresh.
+
+## Three tabs, and where "Needs you" went
+
+Needs-you is a **section at the top of Sessions** rather than a tab of its own. "What
+needs me" and "what else is there" are the same question at two zoom levels, and a tab
+you have to leave to see the second half is a tab you check twice. The waiting badge
+moved to Sessions with the cards — a badge pointing at a section of another tab sends you
+to the wrong place. It hides the moment the filter has anything in it: a card that is on
+the board because something is blocked is not a search result.
+
+That leaves **Sessions · Tasks · New**.
+
+## Deliberate divergences from `/m`
+
+Everything else is parity. These four are improvements, and each fixes a real edge:
+
+- **An expanded tool stays expanded when its result arrives.** `patchTool` in the web
+  client replaces the DOM node wholesale, so a tool collapses at exactly the moment you
+  wanted to read it. Here expansion lives outside the event list, so the result fills
+  in underneath your finger.
+- **`permission-resolved` compares `requestId`** before clearing the visible card.
+- **The board is fetched once on connect.** `overview` is only *pushed* when it changes,
+  which is right for bandwidth and wrong for a client that just attached — on a quiet
+  minute the landing screen would sit on "waiting for the bridge" while six sessions run.
+- **The buffered-stream socket is held open rather than closed.** The one divergence that
+  is not a nicety: closing it, as `/m` does, makes the bridge stop counting a viewer and
+  auto-deny every ask. See *When the network will not carry a stream* above, along with
+  the three smaller differences in that mode.
+
+## Not in scope
+
+Matching `/m`: no terminal, no dev-server control, no bridge shutdown, no
+`bypassPermissions` — the bridge 403s all of these for remote callers. Also out:
+subagent transcripts, queue management, pin/archive/delete, and image rendering.
+
+Within the two surfaces above: no model picker and no draft title on the New tab (both
+are preserved rather than edited, see above), and no `?idle=all` — there is no idle
+column here to show all of.
+
+**Cloudflare Access**, which is recommended upstream but not yet set up. If it is enabled
+in front of the tunnel, every request needs `CF-Access-Client-Id` and
+`CF-Access-Client-Secret` service-token headers. Nothing is built for it, but the seam is
+deliberate: both headers the app already sends are added by interceptors on the *base*
+OkHttp client, so a third interceptor there covers everything at once. That matters
+because `BridgeSse` builds its own `Request` and never passes through `BridgeApi` — the
+interceptor list is the only point that reaches both. Adding it means one interceptor, two
+fields on `BridgeConfig`, and two DataStore keys (route the secret through `TokenCipher`
+as the bearer token already is).
+
+One accident worth recording: the `hello` watchdog makes an Access misconfiguration
+legible for free. Access rejects with a 302 to `*.cloudflareaccess.com` or a 403 HTML
+page, neither of which is the `401` the stream loop special-cases — so without the
+watchdog the stream would open, never send `hello`, and retry at a 30s ceiling behind a
+yellow dot forever. With it, the app falls back after six seconds and the polling GETs
+report the real status.

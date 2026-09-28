@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The bg token from claude-sessions/web/mobile.css. -->
+    <color name="window_background">#131314</color>
+    <!-- The blue the launcher icon's gradient runs between. -->
+    <color name="ic_launcher_background_top">#A8C7FA</color>
+    <color name="ic_launcher_background_bottom">#7FA8E8</color>
+</resources>

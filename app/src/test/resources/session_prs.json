@@ -1,0 +1,31 @@
+{
+    "prs": [
+        {
+            "number": 55,
+            "url": "https://github.com/TheYearIsTwentyGX/TGXCode/pull/55",
+            "repo": "TheYearIsTwentyGX/TGXCode",
+            "title": "Put a page in front of the settings file",
+            "branch": "worktree-settings-page",
+            "updatedAt": "2026-09-03T15:06:45Z",
+            "status": "merged",
+            "label": "merged",
+            "detail": []
+        },
+        {
+            "number": 56,
+            "url": "https://github.com/TheYearIsTwentyGX/TGXCode/pull/56",
+            "repo": "TheYearIsTwentyGX/TGXCode",
+            "title": "Move notifications and pairing into the settings page",
+            "branch": "worktree-settings-bar",
+            "updatedAt": "2026-09-03T16:26:55Z",
+            "status": "merged",
+            "label": "merged",
+            "detail": []
+        }
+    ],
+    "gh": {
+        "ok": true,
+        "error": null
+    },
+    "checkedAt": "2026-09-07T15:16:33.099Z"
+}

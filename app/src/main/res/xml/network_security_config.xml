@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release policy: no cleartext, anywhere.
+
+  Both remote origins — https://tgxcode.com through a Cloudflare tunnel, and
+  https://tg-dylanh.taild5c420.ts.net through `tailscale serve` — are fronted with a
+  real Let's Encrypt certificate chaining to the system store. So there is nothing to
+  pin, no custom trust anchor, and no reason to allow plain HTTP in a shipped build.
+  A third HTTPS origin would need no change here either.
+
+  The debug variant overlays this file (app/src/debug/res/xml/) to permit cleartext
+  to the dev bridge. That has to be a source-set overlay rather than
+  <debug-overrides>, which configures trust anchors only and cannot enable cleartext.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

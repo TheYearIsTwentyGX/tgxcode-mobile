@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The claude-sessions mark, rebuilt as a vector: a dark speech bubble with a `>_`
+  prompt in it. Kept inside the 72x72 safe zone of the 108x108 adaptive viewport so
+  no launcher mask clips the tail.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- The tail, drawn first so the body's fill covers where they join. -->
+    <path
+        android:pathData="M36,64 L27,81"
+        android:strokeColor="#FF131314"
+        android:strokeWidth="9"
+        android:strokeLineCap="round" />
+
+    <!-- Bubble body. -->
+    <path
+        android:pathData="M32,28 L76,28 A8,8 0 0 1 84,36 L84,60 A8,8 0 0 1 76,68 L32,68 A8,8 0 0 1 24,60 L24,36 A8,8 0 0 1 32,28 Z"
+        android:fillColor="#FF131314" />
+
+    <!-- The `>` chevron. -->
+    <path
+        android:pathData="M37,40 L47,48 L37,56"
+        android:strokeColor="#FFA8C7FA"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- The `_` cursor. -->
+    <path
+        android:pathData="M56,55.5 L71,55.5"
+        android:strokeColor="#FFA8C7FA"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round" />
+</vector>
