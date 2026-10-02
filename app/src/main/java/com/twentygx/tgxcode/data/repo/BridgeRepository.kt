@@ -188,6 +188,33 @@ class BridgeRepository(
     val askEvents: SharedFlow<StreamEvent> = _askEvents.asSharedFlow()
 
     /**
+     * Every stream event, after this repository has applied it.
+     *
+     * The seam the feature stores hang off (quota, notifications, snippets…), so each
+     * of them owns its own state without this class growing a field and a branch per
+     * feature. Emitted *after* [handle] has run, so a store reading [conversation] in
+     * response sees the state the event produced.
+     */
+    private val _events = MutableSharedFlow<StreamEvent>(extraBufferCapacity = 64)
+    val events: SharedFlow<StreamEvent> = _events.asSharedFlow()
+
+    /**
+     * "Re-read whatever you hold": the connection was (re)established, or somebody
+     * pulled to refresh. Nothing is replayed to a client that was away, so a store that
+     * only listened to [events] would sit on whatever it last heard before the gap.
+     */
+    private val _resyncs = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    val resyncs: SharedFlow<Unit> = _resyncs.asSharedFlow()
+
+    /**
+     * One tick per polling round, carrying the round number, while the transport will
+     * not carry a stream. A store whose pushes never arrive in that mode picks a tier
+     * off this — the same scheme as [BOARD_EVERY] and friends.
+     */
+    private val _pollRounds = MutableSharedFlow<Int>(extraBufferCapacity = 4)
+    val pollRounds: SharedFlow<Int> = _pollRounds.asSharedFlow()
+
+    /**
      * Say something to the user from outside the repository.
      *
      * The snackbar host is wired to [messages] and nothing else, so a ViewModel with
@@ -375,6 +402,7 @@ class BridgeRepository(
                                 is SseSignal.Message -> {
                                     if (signal.event is StreamEvent.Hello) sawHello = true
                                     handle(signal.event)
+                                    _events.emit(signal.event)
                                 }
                                 is SseSignal.Closed -> {
                                     Tgx.w("stream closed: http=${signal.httpStatus}", signal.cause)
@@ -480,12 +508,14 @@ class BridgeRepository(
             resync()
             var round = 0
             while (isActive) {
-                tickPoll(round++)
+                val thisRound = round++
+                tickPoll(thisRound)
                 // The stream loop bails out on NotPaired and so must this one: a token
                 // the bridge refuses will keep being refused, and polling it every two
                 // and a half seconds forever is the version of this bug that costs
                 // battery instead of just being wrong.
                 if (_connection.value == ConnState.NotPaired) return@launch
+                _pollRounds.tryEmit(thisRound)
                 delay(pollMillis)
             }
         }
@@ -768,6 +798,7 @@ class BridgeRepository(
         loadDrafts()
         // After the rows, deliberately: a glyph is meaningless without one to sit on.
         loadPrs()
+        _resyncs.emit(Unit)
     }
 
     /**
@@ -855,6 +886,7 @@ class BridgeRepository(
         loadDrafts()
         loadPrs()
         loadOpenPrs()
+        _resyncs.emit(Unit)
     }
 
     private suspend fun subscribe() {

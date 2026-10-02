@@ -93,9 +93,15 @@ fun toolBody(
 fun toolBody(event: ToolEvent): String =
     toolBody(event.input, event.result, event.persistedPath)
 
-/** `failed`, blank, or the ellipsis that means still running. */
+/**
+ * `failed`, blank, or the ellipsis that means still running.
+ *
+ * Running is [ToolEvent.isRunning] — `status: "pending"` on the wire, not an absent
+ * one — so a call the bridge has stamped as pending shows its ellipsis rather than
+ * reading as finished.
+ */
 fun toolStatusChip(event: ToolEvent): String = when {
     event.status == "error" -> "failed"
-    event.status != null -> ""
-    else -> "…"
+    event.isRunning -> "…"
+    else -> ""
 }
