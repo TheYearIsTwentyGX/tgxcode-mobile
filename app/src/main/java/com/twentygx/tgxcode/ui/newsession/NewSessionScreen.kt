@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.twentygx.tgxcode.core.ago
 import com.twentygx.tgxcode.data.model.Draft
+import com.twentygx.tgxcode.data.model.SessionChoices
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.ui.conversation.modeLabel
 import com.twentygx.tgxcode.ui.theme.Metrics
@@ -142,6 +143,10 @@ fun NewSessionScreen(
     mode: String,
     modes: List<String>,
     onModeChanged: (String) -> Unit,
+    model: String,
+    onModelChanged: (String) -> Unit,
+    effort: String,
+    onEffortChanged: (String) -> Unit,
     prompt: String,
     onPromptChanged: (String) -> Unit,
     test: Boolean,
@@ -267,6 +272,19 @@ fun NewSessionScreen(
             }
         }
 
+        // Side by side: both are short words, and `inherit` is the answer most of the
+        // time, so two full-width rows would be a lot of screen for two defaults.
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Model", style = MaterialTheme.typography.labelMedium, color = tgx.textMuted)
+                ChoiceButton(model, SessionChoices.MODELS, onModelChanged)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Effort", style = MaterialTheme.typography.labelMedium, color = tgx.textMuted)
+                ChoiceButton(effort, SessionChoices.EFFORTS, onEffortChanged)
+            }
+        }
+
         Text("First message", style = MaterialTheme.typography.labelMedium, color = tgx.textMuted)
         OutlinedTextField(
             value = prompt,
@@ -389,9 +407,8 @@ private fun DraftRow(
     val meta = listOfNotNull(
         draft.projectName?.takeIf { it.isNotBlank() },
         modeLabel(draft.permissionMode),
-        // `model` has no control on this screen, but it is what the session will run
-        // with, so it is worth saying rather than silently carrying.
         draft.model?.takeIf { it.isNotBlank() },
+        draft.effort?.takeIf { it.isNotBlank() }?.let { "effort $it" },
         ago(draft.updatedAt).takeIf { it.isNotBlank() },
     ).joinToString(" · ")
 
@@ -435,5 +452,25 @@ private fun DraftRow(
             shape = Pill,
             modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.TouchTarget),
         ) { Text(if (editing) "Save and start" else "Start") }
+    }
+}
+
+/** A full-width dropdown over [SessionChoices], `""` reading as `inherit`. */
+@Composable
+private fun ChoiceButton(value: String, options: List<String>, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(
+            onClick = { open = true },
+            modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.FieldHeight),
+        ) { Text(SessionChoices.label(value), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(SessionChoices.label(option)) },
+                    onClick = { open = false; onPick(option) },
+                )
+            }
+        }
     }
 }

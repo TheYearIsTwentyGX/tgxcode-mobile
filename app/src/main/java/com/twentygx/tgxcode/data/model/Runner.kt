@@ -87,3 +87,21 @@ data class RunnerStatus(
     val isWorking: Boolean
         get() = runnerState == RunnerState.Busy || runnerState == RunnerState.Starting
 }
+
+/**
+ * What the model and effort pickers offer, matching the desktop's `#model` and
+ * `#effort` selects. `""` is `inherit` in both — no flag, so Claude Code decides.
+ *
+ * A value the runner reports that is not in the list (a summary carries the full model
+ * id the transcript recorded, `claude-opus-…`, not the alias) shows as `inherit`, as
+ * the desktop's `paintModel` does: a picker cannot show an option it does not have.
+ */
+object SessionChoices {
+    val MODELS = listOf("", "opus", "sonnet", "haiku", "fable")
+    val EFFORTS = listOf("", "low", "medium", "high", "xhigh", "max")
+
+    fun knownModel(value: String?): String = value?.takeIf { it in MODELS }.orEmpty()
+    fun knownEffort(value: String?): String = value?.takeIf { it in EFFORTS }.orEmpty()
+
+    fun label(value: String): String = value.ifBlank { "inherit" }
+}

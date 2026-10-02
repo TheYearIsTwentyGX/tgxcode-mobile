@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.twentygx.tgxcode.data.model.RunnerStatus
+import com.twentygx.tgxcode.data.model.SessionChoices
 import com.twentygx.tgxcode.ui.theme.Metrics
 import com.twentygx.tgxcode.ui.theme.Pill
 import com.twentygx.tgxcode.ui.theme.Radius
@@ -65,6 +66,82 @@ private fun humanize(raw: String): String =
         .filter { it.isNotBlank() }
         .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
 
+/**
+ * A compact dropdown: the current value as a label, the options in a menu.
+ *
+ * Three of these sit side by side on a 390dp phone, so each is sized by its label
+ * and nothing else — `Accept Edits · opus · high` fits, with Stop beside it.
+ */
+@Composable
+fun PickerChip(
+    value: String,
+    options: List<String>,
+    label: (String) -> String,
+    onPick: (String) -> Unit,
+    description: String,
+    modifier: Modifier = Modifier,
+    /**
+     * What the chip itself says, when that differs from the option's name. Two chips
+     * both reading `inherit` side by side say nothing about which is which, so an
+     * inheriting model chip reads `Model` and the menu still offers `inherit`.
+     */
+    chipLabel: (String) -> String = label,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        TextButton(
+            onClick = { open = true },
+            modifier = Modifier.heightIn(min = 32.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+        ) {
+            Text(
+                chipLabel(value),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                description,
+                style = MaterialTheme.typography.labelSmall,
+                color = tgx.textFaint,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            label(option),
+                            color = if (option == value) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    },
+                    onClick = {
+                        open = false
+                        onPick(option)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What the composer needs beyond the text: the three pickers, and the things that can
+ * be pending on a send — a held settings change, an armed branch, a queue.
+ */
+data class ComposerControls(
+    val model: String = "",
+    val onModelChanged: (String) -> Unit = {},
+    val effort: String = "",
+    val onEffortChanged: (String) -> Unit = {},
+    /** The armed Edit and branch's banner, or null. */
+    val branchBanner: String? = null,
+    val onCancelBranch: () -> Unit = {},
+    val onOpenQueue: () -> Unit = {},
+)
+
 @Composable
 fun Composer(
     text: String,
@@ -77,12 +154,17 @@ fun Composer(
     onSend: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
+    controls: ComposerControls = ComposerControls(),
 ) {
-    var modeMenuOpen by remember { mutableStateOf(false) }
-
+    val queued = runner?.queue?.size?.takeIf { it > 0 } ?: runner?.queued?.takeIf { it > 0 }
+    val held = runner?.pendingSettings
     val note = listOfNotNull(
         runner?.activity?.takeIf { it.isNotBlank() },
-        runner?.queued?.takeIf { it > 0 }?.let { "$it queued" },
+        runner?.stalled?.takeIf { it }?.let { "stalled" },
+        held?.let {
+            "held until background work ends: " +
+                "${SessionChoices.label(it.model.orEmpty())} · ${SessionChoices.label(it.effort.orEmpty())}"
+        },
     ).joinToString(" · ")
 
     Column(
@@ -92,40 +174,59 @@ fun Composer(
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                TextButton(
-                    onClick = { modeMenuOpen = true },
-                    modifier = Modifier.heightIn(min = 32.dp),
-                ) {
-                    Text(
-                        modeLabel(mode),
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                DropdownMenu(expanded = modeMenuOpen, onDismissRequest = { modeMenuOpen = false }) {
-                    modes.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(modeLabel(option)) },
-                            onClick = {
-                                modeMenuOpen = false
-                                onModeChanged(option)
-                            },
-                        )
-                    }
+        controls.branchBanner?.let { banner ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tgx.blueTint, androidx.compose.foundation.shape.RoundedCornerShape(Radius.Sm))
+                    .padding(start = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    banner,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f).padding(vertical = 6.dp),
+                )
+                TextButton(onClick = controls.onCancelBranch) {
+                    Text("Cancel", style = MaterialTheme.typography.labelMedium)
                 }
             }
+        }
 
-            Text(
-                note,
-                style = MaterialTheme.typography.labelMedium,
-                color = tgx.textFaint,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PickerChip(
+                value = mode,
+                options = modes,
+                label = ::modeLabel,
+                onPick = onModeChanged,
+                description = "Permission mode",
             )
+            PickerChip(
+                value = controls.model,
+                options = SessionChoices.MODELS,
+                label = SessionChoices::label,
+                onPick = controls.onModelChanged,
+                description = "Model",
+                chipLabel = { it.ifBlank { "Model" } },
+            )
+            PickerChip(
+                value = controls.effort,
+                options = SessionChoices.EFFORTS,
+                label = SessionChoices::label,
+                onPick = controls.onEffortChanged,
+                description = "Effort",
+                chipLabel = { it.ifBlank { "Effort" } },
+            )
+
+            Box(Modifier.weight(1f))
+
+            if (queued != null) {
+                TextButton(
+                    onClick = controls.onOpenQueue,
+                    modifier = Modifier.heightIn(min = 32.dp),
+                ) { Text("$queued queued", style = MaterialTheme.typography.labelMedium) }
+            }
 
             // Only while there is something to stop.
             if (runner?.isWorking == true) {
@@ -133,8 +234,23 @@ fun Composer(
                     onClick = onStop,
                     shape = Pill,
                     modifier = Modifier.heightIn(min = 32.dp),
-                ) { Text("Stop", color = tgx.red, style = MaterialTheme.typography.labelMedium) }
+                ) {
+                    // A stalled turn is stopped hard (see AppViewModel.stop), but the
+                    // word stays the same: what the person wants is the same.
+                    Text("Stop", color = tgx.red, style = MaterialTheme.typography.labelMedium)
+                }
             }
+        }
+
+        if (note.isNotBlank()) {
+            Text(
+                note,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (runner?.stalled == true) tgx.yellow else tgx.textFaint,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 6.dp),
+            )
         }
 
         Row(verticalAlignment = Alignment.Bottom) {
@@ -144,7 +260,7 @@ fun Composer(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = Metrics.TouchTarget, max = 200.dp),
-                placeholder = { Text("Message") },
+                placeholder = { Text(if (controls.branchBanner != null) "Edited message" else "Message") },
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(Radius.Lg),
                 textStyle = MaterialTheme.typography.bodyMedium,
             )

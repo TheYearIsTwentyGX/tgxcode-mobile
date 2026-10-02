@@ -33,6 +33,8 @@ data class Draft(
     val title: String? = null,
     /** `null` is `inherit` — the session picks for itself. Not `""`. */
     val model: String? = null,
+    /** `null` is `inherit`: no `--effort`, so Claude's own `effortLevel` decides. */
+    val effort: String? = null,
     val permissionMode: String = "auto",
     /** The flag the started session will get, not a property of the draft. */
     val test: Boolean = false,
@@ -64,10 +66,15 @@ data class DraftResponse(val draft: Draft)
 /**
  * The create body, and the patch body.
  *
- * Deliberately carries **no `model` and no `title`**, and that is the interesting part.
- * `PATCH` is a genuine partial (`docs/api.md:1052`) — a field left out is left alone —
- * so omitting them *preserves* whatever was set at the desk. This screen has no model
- * picker and no title field, so it must not be able to clear either by saving.
+ * Carries **no `title`**, and that is the interesting part. `PATCH` is a genuine
+ * partial — a field left out is left alone — so omitting it *preserves* whatever was
+ * set at the desk. This screen has no title field, so it must not be able to clear
+ * one by saving.
+ *
+ * [model] and [effort] *are* sent, now that the form has a picker for each, and
+ * `inherit` goes as `""`: the bridge stores a whitespace-only value as `null`, which
+ * is how a phone clears a model chosen at the desk. Sending Kotlin `null` would be
+ * dropped from the body by `explicitNulls = false` and change nothing.
  *
  * [permissionMode] is always sent, never conditionally: an absent one does not mean
  * "decide later", it means the draft is saved as `auto`.
@@ -78,4 +85,7 @@ data class DraftBody(
     val prompt: String,
     val permissionMode: String,
     val test: Boolean,
+    /** No default, on purpose: `AppJson` does not encode defaults, so a default `""` would never be sent. */
+    val model: String,
+    val effort: String,
 )

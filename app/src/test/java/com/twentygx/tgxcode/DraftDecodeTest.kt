@@ -88,8 +88,9 @@ class DraftDecodeTest {
     }
 
     /**
-     * The test this file exists for: **no `model` key and no `title` key**, so a PATCH
-     * from a screen that cannot edit either cannot clear either.
+     * The test this file exists for: **no `title` key**, so a PATCH from a screen that
+     * cannot edit one cannot clear it — and `inherit` goes as `""`, which the bridge
+     * stores as null, rather than being dropped from the body.
      */
     @Test
     fun `a draft body sends only what this screen can edit`() {
@@ -100,10 +101,13 @@ class DraftDecodeTest {
                 prompt = "Add a CSV export",
                 permissionMode = "plan",
                 test = false,
+                model = "",
+                effort = "high",
             ),
         )
 
-        assertFalse("a PATCH must not clear the model", body.contains("model"))
+        assertTrue("inherit is sent, so it can clear a desk pick", body.contains("\"model\":\"\""))
+        assertTrue(body.contains("\"effort\":\"high\""))
         assertFalse("a PATCH must not clear the title", body.contains("title"))
         assertTrue(body.contains("\"permissionMode\":\"plan\""))
         assertTrue(body.contains("\"test\":false"))

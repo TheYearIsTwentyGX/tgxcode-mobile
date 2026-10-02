@@ -8,10 +8,14 @@ import com.twentygx.tgxcode.data.model.CreateSessionResponse
 import com.twentygx.tgxcode.data.model.DraftBody
 import com.twentygx.tgxcode.data.model.DraftResponse
 import com.twentygx.tgxcode.data.model.DraftsResponse
+import com.twentygx.tgxcode.data.model.FlagsRequest
+import com.twentygx.tgxcode.data.model.FlagsResponse
 import com.twentygx.tgxcode.data.model.Health
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.PrsPayload
+import com.twentygx.tgxcode.data.model.QueueReorderRequest
+import com.twentygx.tgxcode.data.model.QueueWriteResponse
 import com.twentygx.tgxcode.data.model.SendRequest
 import com.twentygx.tgxcode.data.model.SendResponse
 import com.twentygx.tgxcode.data.model.SessionDetail
@@ -19,6 +23,7 @@ import com.twentygx.tgxcode.data.model.SessionPrsResponse
 import com.twentygx.tgxcode.data.model.SessionSuggestions
 import com.twentygx.tgxcode.data.model.SessionsResponse
 import com.twentygx.tgxcode.data.model.SinceResponse
+import com.twentygx.tgxcode.data.model.StopRequest
 import com.twentygx.tgxcode.data.model.StopResponse
 import com.twentygx.tgxcode.data.model.SubscribeRequest
 import com.twentygx.tgxcode.data.model.SuggestionActRequest
@@ -43,8 +48,7 @@ private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
  * Deliberately absent, because the bridge refuses them for remote callers and a
  * button that always fails is worse than no button: the terminal routes, shutdown,
  * dev-server control, DevBrowser control, and reveal. Also absent because the phone
- * surface does not have them: queue management, flags, delete, and the filesystem
- * picker.
+ * surface does not have it: the filesystem picker.
  *
  * `GET /api/taskboard` is absent for a third reason — not refused and not unwanted,
  * but redundant. See [suggestions].
@@ -173,8 +177,35 @@ class BridgeApi(
     suspend fun send(sessionId: String, body: SendRequest): ApiResult<SendResponse> =
         post("api/sessions/${sessionId.encoded()}/send", body, serializer())
 
-    suspend fun stop(sessionId: String): ApiResult<StopResponse> =
-        post("api/sessions/${sessionId.encoded()}/stop", JsonObject(emptyMap()), serializer())
+    /**
+     * @param hard SIGTERM then SIGKILL rather than asking the CLI to interrupt itself.
+     *   What a stalled turn gets: a process that has gone silent is the one least
+     *   likely to answer an interrupt.
+     */
+    suspend fun stop(sessionId: String, hard: Boolean = false): ApiResult<StopResponse> =
+        post(
+            "api/sessions/${sessionId.encoded()}/stop",
+            StopRequest(hard = hard.takeIf { it }),
+            serializer(),
+        )
+
+    /**
+     * Drop one queued message. `409` means it already went — including a `handed` one
+     * the running turn read first — which is an outcome, not a failure.
+     */
+    suspend fun dropQueued(sessionId: String, queueId: String): ApiResult<QueueWriteResponse> =
+        delete("api/sessions/${sessionId.encoded()}/queue/${queueId.encoded()}", serializer())
+
+    /** The whole new order. A `handed` id keeps its place at the front whatever is sent. */
+    suspend fun reorderQueue(sessionId: String, ids: List<String>): ApiResult<QueueWriteResponse> =
+        post("api/sessions/${sessionId.encoded()}/queue/reorder", QueueReorderRequest(ids), serializer())
+
+    suspend fun setFlags(sessionId: String, body: FlagsRequest): ApiResult<FlagsResponse> =
+        post("api/sessions/${sessionId.encoded()}/flags", body, serializer())
+
+    /** A hard delete of the transcript. `409` while a turn is running. */
+    suspend fun deleteSession(sessionId: String): ApiResult<JsonObject> =
+        delete("api/sessions/${sessionId.encoded()}", serializer())
 
     /**
      * Answers all three kinds of ask.
