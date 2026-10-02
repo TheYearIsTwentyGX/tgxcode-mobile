@@ -20,6 +20,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
@@ -210,11 +213,17 @@ private fun SessionRow(
     ).joinToString(" · ")
 
     val haptics = LocalHapticFeedback.current
+    // The project's colour from the desktop, as the rail wears it: a stripe on the
+    // leading edge. No colour, no stripe — nothing else about the row changes.
+    val accent = com.twentygx.tgxcode.ui.theme.projectAccent(session.cwd ?: session.projectCwd)
 
     Row(
         modifier
             .fillMaxWidth()
             .heightIn(min = Metrics.SessionRowHeight)
+            .drawBehind {
+                if (accent != null) drawRect(accent, Offset.Zero, Size(3.dp.toPx(), size.height))
+            }
             // Replaces `clickable` rather than joining it: two of these would mean two
             // indication nodes and two overlapping gesture detectors. A long press that
             // fires does *not* also fire the tap — the gesture loop consumes the

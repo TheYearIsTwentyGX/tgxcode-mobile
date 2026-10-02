@@ -34,6 +34,7 @@ import com.twentygx.tgxcode.data.model.Snippet
 import com.twentygx.tgxcode.data.model.SnippetGroup
 import com.twentygx.tgxcode.ui.common.TgxSheet
 import com.twentygx.tgxcode.ui.theme.Metrics
+import com.twentygx.tgxcode.ui.theme.parseHex
 import com.twentygx.tgxcode.ui.theme.TgxType
 import com.twentygx.tgxcode.ui.theme.tgx
 
@@ -41,15 +42,7 @@ import com.twentygx.tgxcode.ui.theme.tgx
  * `#rgb` / `#rrggbb` into a colour, or null — the same strict gate the bridge applies,
  * so a stored accent that is anything else simply draws no accent.
  */
-internal fun hexColor(hex: String?): Color? {
-    val raw = hex?.trim()?.removePrefix("#") ?: return null
-    val full = when {
-        Regex("^[0-9a-fA-F]{3}$").matches(raw) -> raw.map { "$it$it" }.joinToString("")
-        Regex("^[0-9a-fA-F]{6}$").matches(raw) -> raw
-        else -> return null
-    }
-    return Color(0xFF000000 or full.toLong(16))
-}
+internal fun hexColor(hex: String?): Color? = hex?.let(::parseHex)
 
 /**
  * The pinned snippets as chips above the box, then a chip for the rest — the desktop's

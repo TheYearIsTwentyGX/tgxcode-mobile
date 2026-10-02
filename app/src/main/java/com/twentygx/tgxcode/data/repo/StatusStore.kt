@@ -45,6 +45,10 @@ class StatusStore(
     private val _inbox = MutableStateFlow(Inbox())
     val inbox: StateFlow<Inbox> = _inbox.asStateFlow()
 
+    /** Project colours from the desktop's settings, keyed by path. See `projectColor`. */
+    private val _projectColors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val projectColors: StateFlow<Map<String, String>> = _projectColors.asStateFlow()
+
     private val _refreshingQuota = MutableStateFlow(false)
     val refreshingQuota: StateFlow<Boolean> = _refreshingQuota.asStateFlow()
 
@@ -63,6 +67,7 @@ class StatusStore(
     private suspend fun loadAll() {
         loadQuota()
         loadInbox()
+        api.prefs().getOrNull()?.let { _projectColors.value = it.projects?.colors.orEmpty() }
     }
 
     suspend fun loadQuota() {
@@ -78,6 +83,8 @@ class StatusStore(
     private fun onEvent(event: StreamEvent) {
         when (event) {
             is StreamEvent.QuotaChanged -> _quota.value = event.quota
+
+            is StreamEvent.PrefsChanged -> _projectColors.value = event.prefs.projects?.colors.orEmpty()
 
             // The default scope is the loud rows, so a quiet one filed now would not be
             // in a page fetched now either — keep the inbox to the same rule.

@@ -357,12 +357,12 @@ filled; a list anywhere else would be a second place claiming to be where a sess
 set up. `docs/api.md:121` names the case it exists for — *"setting work up at the desk
 and releasing it from a phone when quota frees up"* — and this is the releasing half.
 
-One thing worth knowing about the edit path. The phone has no model picker and no title
-field, so `PATCH /api/drafts/:id` is sent **without `model` and without `title`**. The
-route is a genuine partial, so omitting them preserves whatever was set at the desk;
-sending them as nulls would silently clear both on every phone edit, which is the kind of
-data loss nobody notices until a session starts on the wrong model. Verified against the
-live bridge, and covered by `DraftDecodeTest`.
+One thing worth knowing about the edit path. The phone has no title field, so
+`PATCH /api/drafts/:id` is sent **without `title`**. The route is a genuine partial, so
+omitting it preserves whatever was set at the desk. `model` and `effort` *are* sent now
+that the form has a picker for each, with `inherit` as `""`, which the bridge stores as
+`null`. That is how a phone clears a desk pick; a Kotlin `null` would be dropped from the
+body by `explicitNulls = false` and change nothing. Covered by `DraftDecodeTest`.
 
 `GET /api/taskboard` is deliberately unused. Its `suggested` column is
 `GET /api/suggestions?status=open` verbatim, and its other three are a second answer to
@@ -370,6 +370,35 @@ what the Sessions tab already says — so subscribing to its push would send sev
 hundred cards every three seconds to keep one column fresh. The cost is that a newly
 filed task is not pushed; `docs/api.md:855` names the substitute, and this client refetches
 on `sessions-changed`, on `suggestion-changed`, on `hello` and on pull-to-refresh.
+
+## Caught up with the desktop
+
+The desktop moved on after this client was first written. These are its features as
+they now appear here, and where to find each one:
+
+| Feature | Where | Notes |
+|---|---|---|
+| Model and effort | the composer's pickers; the New tab; drafts | effort is always sent, `""` meaning inherit, because it is the one send field where absent and null differ |
+| Edit and resend / Edit and branch | long-press one of your own turns | a branch sends `fork` + `fromUuid` (the turn's own id); the first turn becomes a new session in the same folder |
+| Queue | the "N queued" chip | drop and reorder; a `handed` message keeps its place |
+| Pin, archive, rename, delete | long-press a session row | an Archived chip lists the archived sessions |
+| Standing line, stalled | session rows, Needs-you cards | a stall also raises a notification while the service runs; Stop on a stalled turn is a hard stop |
+| Quota | the pill in the top bar | each reading's age is measured on the bridge's clock and greyed past 30 minutes |
+| History | the bell | the notification log, with read watermarks |
+| Checklist | the bar above the transcript | from `task-list` |
+| Long transcripts | "N earlier turns — load more"; the turn list in the top bar | `?turns=8` and `/range`, holding any result whose call is not loaded yet |
+| Subagents | "Open the subagent's transcript ›" on an Agent call | followed live with `subscribe {agent: {toolUseId, offset}}` |
+| Changes, diffs, scratchpad | the conversation's ⋮ menu | |
+| Send later | long-press Send | the mode is stored per message and never defaulted |
+| Snippets | chips above the composer; Settings → Snippets | `{{params}}`, the three insert modes and auto-submit, by `popover.js`'s rules |
+| Schedules | the calendar icon on the Tasks tab | only changed fields are PATCHed, so a `dontAsk` schedule can still be paused from here |
+| Slash commands | type `/` | |
+| Project colours | row stripe, card dot, a rule under the conversation's top bar | read-only: `PUT /api/prefs` is refused to remote callers |
+
+`StatusStore` (quota, history, colours) and `WorkspaceStore` (scheduled messages,
+snippets, schedules) hang off `BridgeRepository`'s `events`, `resyncs` and `pollRounds`
+flows. So each feature owns its own state, and none of them adds a branch to the
+repository's stream handler.
 
 ## Three tabs, and where "Needs you" went
 
@@ -401,13 +430,22 @@ Everything else is parity. These four are improvements, and each fixes a real ed
 
 ## Not in scope
 
-Matching `/m`: no terminal, no dev-server control, no bridge shutdown, no
-`bypassPermissions` — the bridge 403s all of these for remote callers. Also out:
-subagent transcripts, queue management, pin/archive/delete, and image rendering.
+These are refused by the bridge for remote callers, so a button for them could never
+work:
+- the terminal and project commands;
+- dev-server and DevBrowser control;
+- bridge shutdown and restart;
+- `bypassPermissions` and `dontAsk`;
+- starting a session in a new worktree;
+- editing prefs, including project colours;
+- editing Claude Code's settings and `CLAUDE.md`.
 
-Within the two surfaces above: no model picker and no draft title on the New tab (both
-are preserved rather than edited, see above), and no `?idle=all` — there is no idle
-column here to show all of.
+Also out, by choice:
+- image rendering and attachments;
+- slash-command completion on the New tab, which would use the `?cwd=` form;
+- one-time (`at`) schedules and the pull-request gate's options in the schedule editor;
+- the live board as a queue, and the task board's other columns, for the reason given
+  above.
 
 **Cloudflare Access**, which is recommended upstream but not yet set up. If it is enabled
 in front of the tunnel, every request needs `CF-Access-Client-Id` and

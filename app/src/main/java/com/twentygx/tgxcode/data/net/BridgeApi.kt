@@ -36,6 +36,7 @@ import com.twentygx.tgxcode.data.model.Quota
 import com.twentygx.tgxcode.data.model.QuotaRefreshResponse
 import com.twentygx.tgxcode.data.model.TaskList
 import com.twentygx.tgxcode.data.model.Overview
+import com.twentygx.tgxcode.data.model.Prefs
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.PrsPayload
 import com.twentygx.tgxcode.data.model.RangeResponse
@@ -216,6 +217,9 @@ class BridgeApi(
     /** The agent's checklist for one session. An empty list is a 200, not a 404. */
     suspend fun taskList(sessionId: String): ApiResult<TaskList> =
         get("api/sessions/${sessionId.encoded()}/tasks", serializer())
+
+    /** The user-level settings, for the project colours. Readable remotely; writing them is not. */
+    suspend fun prefs(): ApiResult<Prefs> = get("api/prefs", serializer())
 
     /** Account-wide, and open to a remote caller on purpose. */
     suspend fun quota(): ApiResult<Quota> = get("api/quota", serializer())
