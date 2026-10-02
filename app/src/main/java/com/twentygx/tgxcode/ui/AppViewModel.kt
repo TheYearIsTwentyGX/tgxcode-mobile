@@ -45,6 +45,7 @@ class AppViewModel(
 ) : ViewModel() {
 
     val repo: BridgeRepository = container.repository
+    val status = container.status
     val settings: SettingsStore = container.settings
 
     /**
@@ -222,6 +223,11 @@ class AppViewModel(
         // A branch was about the session it was armed on, and would be a surprise
         // waiting on the next one opened.
         if (_branch.value?.sessionId != sessionId) _branch.value = null
+        // Opening a conversation is reading it, as on the desktop — but only worth a
+        // request when the inbox holds something unread about it.
+        if (status.inbox.value.rows.any { it.sessionId == sessionId && it.loud && !it.read }) {
+            status.markRead(sessionId)
+        }
         val fresh = justCreated == sessionId
         if (fresh) justCreated = null
         repo.openSession(sessionId, awaitCreation = fresh)

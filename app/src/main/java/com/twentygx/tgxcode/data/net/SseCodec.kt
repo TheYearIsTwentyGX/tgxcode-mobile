@@ -2,6 +2,9 @@ package com.twentygx.tgxcode.data.net
 
 import com.twentygx.tgxcode.core.AppJson
 import com.twentygx.tgxcode.data.model.Ask
+import com.twentygx.tgxcode.data.model.NotificationRow
+import com.twentygx.tgxcode.data.model.Quota
+import com.twentygx.tgxcode.data.model.TaskList
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.data.model.PrsPayload
 import com.twentygx.tgxcode.data.model.RunnerStatus
@@ -29,7 +32,7 @@ object SseCodec {
         "agent-tail" -> AppJson.decodeFromString<StreamEvent.AgentTail>(data)
         "agent-reset" -> AppJson.decodeFromString<StreamEvent.AgentReset>(data)
 
-        // These four arrive as the bare payload rather than a wrapper object, so
+        // These arrive as the bare payload rather than a wrapper object, so
         // they are decoded into their inner type and wrapped here.
         "overview" ->
             StreamEvent.BoardChanged(AppJson.decodeFromString(serializer<Overview>(), data))
@@ -39,6 +42,12 @@ object SseCodec {
             StreamEvent.PermissionRequested(AppJson.decodeFromString(serializer<Ask>(), data))
         "prs-changed" ->
             StreamEvent.PrsChanged(AppJson.decodeFromString(serializer<PrsPayload>(), data))
+        "task-list" ->
+            StreamEvent.TaskListChanged(AppJson.decodeFromString(serializer<TaskList>(), data))
+        "quota" ->
+            StreamEvent.QuotaChanged(AppJson.decodeFromString(serializer<Quota>(), data))
+        "notification" ->
+            StreamEvent.NotificationFiled(AppJson.decodeFromString(serializer<NotificationRow>(), data))
 
         "sessions-changed" -> AppJson.decodeFromString<StreamEvent.SessionsChanged>(data)
         "session-deleted" -> AppJson.decodeFromString<StreamEvent.SessionDeleted>(data)
@@ -49,6 +58,11 @@ object SseCodec {
         "session-forked" -> AppJson.decodeFromString<StreamEvent.SessionForked>(data)
         "drafts-changed" -> AppJson.decodeFromString<StreamEvent.DraftsChanged>(data)
         "suggestion-changed" -> AppJson.decodeFromString<StreamEvent.SuggestionChanged>(data)
+        "standing-changed" -> AppJson.decodeFromString<StreamEvent.StandingChanged>(data)
+        "runner-stalled" -> AppJson.decodeFromString<StreamEvent.RunnerStalled>(data)
+        "notification-resolved" -> AppJson.decodeFromString<StreamEvent.NotificationResolved>(data)
+        "notification-read" -> AppJson.decodeFromString<StreamEvent.NotificationRead>(data)
+        "notifications-cleared" -> AppJson.decodeFromString<StreamEvent.NotificationsCleared>(data)
 
         else -> null
     }

@@ -11,6 +11,12 @@ import com.twentygx.tgxcode.data.model.DraftsResponse
 import com.twentygx.tgxcode.data.model.FlagsRequest
 import com.twentygx.tgxcode.data.model.FlagsResponse
 import com.twentygx.tgxcode.data.model.Health
+import com.twentygx.tgxcode.data.model.MarkReadRequest
+import com.twentygx.tgxcode.data.model.MarkReadResponse
+import com.twentygx.tgxcode.data.model.NotificationsResponse
+import com.twentygx.tgxcode.data.model.Quota
+import com.twentygx.tgxcode.data.model.QuotaRefreshResponse
+import com.twentygx.tgxcode.data.model.TaskList
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.PrsPayload
@@ -166,7 +172,33 @@ class BridgeApi(
     suspend fun sessionPrs(sessionId: String): ApiResult<SessionPrsResponse> =
         get("api/sessions/${sessionId.encoded()}/prs", serializer())
 
+    /** The agent's checklist for one session. An empty list is a 200, not a 404. */
+    suspend fun taskList(sessionId: String): ApiResult<TaskList> =
+        get("api/sessions/${sessionId.encoded()}/tasks", serializer())
+
+    /** Account-wide, and open to a remote caller on purpose. */
+    suspend fun quota(): ApiResult<Quota> = get("api/quota", serializer())
+
+    /**
+     * @param scope `notable` (the default: loud rows only) or `all`.
+     */
+    suspend fun notifications(scope: String = "notable", limit: Int = 200): ApiResult<NotificationsResponse> =
+        get("api/notifications", serializer(), "scope" to scope, "limit" to limit.toString())
+
     // ---------------------------------------------------------------- writing
+
+    /**
+     * Run the beacon now. A `409` carries the payload too (`needsSetup` or `running`),
+     * and the caller reads the next scheduled reading instead of reporting a failure.
+     */
+    suspend fun refreshQuota(): ApiResult<QuotaRefreshResponse> =
+        post("api/quota/refresh", JsonObject(emptyMap()), serializer())
+
+    suspend fun markRead(body: MarkReadRequest): ApiResult<MarkReadResponse> =
+        post("api/notifications/read", body, serializer())
+
+    suspend fun clearNotifications(): ApiResult<JsonObject> =
+        delete("api/notifications", serializer())
 
     suspend fun subscribe(body: SubscribeRequest): ApiResult<JsonObject> =
         post("api/subscribe", body, serializer())

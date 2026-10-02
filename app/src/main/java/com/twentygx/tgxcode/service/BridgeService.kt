@@ -65,6 +65,7 @@ class BridgeService : Service() {
         job = serviceScope.launch {
             launch { watchConnection(app) }
             launch { watchAsks(app) }
+            launch { watchStalls(app) }
         }
     }
 
@@ -160,6 +161,24 @@ class BridgeService : Service() {
                 AskNotifications.cancel(context, sessionId)
             }
             shown.keys.retainAll(blocked.keys)
+        }
+    }
+
+    /** One notification per crossing into stalled; the crossing back takes it down. */
+    private suspend fun watchStalls(app: TgxApp) {
+        val repo = app.container.repository
+        repo.events.collect { event ->
+            if (event !is StreamEvent.RunnerStalled) return@collect
+            if (event.stalled) {
+                AskNotifications.showStalled(
+                    this,
+                    event.sessionId,
+                    repo.titleOf(event.sessionId),
+                    event.stalledAfterMs?.let { it / 60_000 },
+                )
+            } else {
+                AskNotifications.cancelStalled(this, event.sessionId)
+            }
         }
     }
 

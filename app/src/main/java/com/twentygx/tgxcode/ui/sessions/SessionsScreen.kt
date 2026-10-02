@@ -202,6 +202,7 @@ private fun SessionRow(
     modifier: Modifier = Modifier,
 ) {
     val meta = listOfNotNull(
+        "stalled".takeIf { session.isStalled },
         "pinned".takeIf { session.pinned },
         session.place?.takeIf { it.isNotBlank() },
         ago(session.lastTs).takeIf { it.isNotBlank() },
@@ -245,6 +246,17 @@ private fun SessionRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            // Where the last turn left things. Hidden while it works — see
+            // [SessionSummary.standingLine] — and absent far more often than not.
+            session.standingLine?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tgx.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             // The glyph leads the meta line, which is where the rail puts it: *"ahead
             // of the worktree name and the activity, which are the two things this line
             // is allowed to squeeze out"*. Leading also means it sits in a straight

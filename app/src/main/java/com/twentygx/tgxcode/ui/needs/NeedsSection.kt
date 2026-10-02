@@ -149,6 +149,17 @@ fun BoardCardItem(
 
         Text(card.why, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
 
+        // The bridge's judgement, not the CLI's: busy, silent past the threshold, no
+        // tool call open and nothing waiting on you. An ask outranks it — waiting on a
+        // person is not silence.
+        if (card.ask == null && card.runner?.stalled == true) {
+            Text(
+                "Stalled — nothing from it for a while",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.yellow,
+            )
+        }
+
         // Only when there is no ask: if something is blocked, the block is the news.
         if (card.ask == null) {
             card.headline?.let {

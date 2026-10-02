@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CheckCircle
@@ -67,6 +68,9 @@ import com.twentygx.tgxcode.ui.tasks.TaskActions
 import com.twentygx.tgxcode.ui.tasks.TasksScreen
 import com.twentygx.tgxcode.ui.settings.NotPairedScreen
 import com.twentygx.tgxcode.ui.settings.SettingsScreen
+import com.twentygx.tgxcode.ui.status.NotificationsScreen
+import com.twentygx.tgxcode.ui.status.QuotaPill
+import com.twentygx.tgxcode.ui.status.QuotaSheet
 import com.twentygx.tgxcode.ui.theme.Metrics
 import kotlinx.serialization.Serializable
 
@@ -75,6 +79,7 @@ import kotlinx.serialization.Serializable
 @Serializable object Tasks
 @Serializable object NewSession
 @Serializable object Settings
+@Serializable object Notifications
 @Serializable data class Conversation(val sessionId: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,6 +117,10 @@ fun TgxCodeRoot(
     val opening by vm.repo.opening.collectAsStateWithLifecycle()
     val sessionSheet by vm.sessionSheet.collectAsStateWithLifecycle()
     val branch by vm.branch.collectAsStateWithLifecycle()
+    val quota by vm.status.quota.collectAsStateWithLifecycle()
+    val refreshingQuota by vm.status.refreshingQuota.collectAsStateWithLifecycle()
+    val inbox by vm.status.inbox.collectAsStateWithLifecycle()
+    var quotaOpen by rememberSaveable { mutableStateOf(false) }
 
     var filter by rememberSaveable { mutableStateOf("") }
     var showArchived by rememberSaveable { mutableStateOf(false) }
@@ -165,14 +174,16 @@ fun TgxCodeRoot(
     val destination = entry?.destination
     val onConversation = destination?.hasRoute(Conversation::class) == true
     val onSettings = destination?.hasRoute(Settings::class) == true
+    val onNotifications = destination?.hasRoute(Notifications::class) == true
     // Hidden on a conversation, exactly like mobile.css hides the tab bar there —
     // one screen at a time is the whole shape of this surface.
-    val showTabs = !onConversation && !onSettings
+    val showTabs = !onConversation && !onSettings && !onNotifications
 
     val title = when {
         onConversation -> conversation?.summary?.displayTitle
             ?: if (opening != null) "Starting…" else "Loading…"
         onSettings -> "Settings"
+        onNotifications -> "History"
         destination?.hasRoute(Tasks::class) == true -> "Tasks"
         destination?.hasRoute(NewSession::class) == true -> "Start a session"
         else -> "Sessions"
@@ -242,7 +253,7 @@ fun TgxCodeRoot(
                         )
                     },
                     navigationIcon = {
-                        if (onConversation || onSettings) {
+                        if (onConversation || onSettings || onNotifications) {
                             IconButton(onClick = {
                                 if (onConversation) vm.closeConversation()
                                 if (!nav.popBackStack()) nav.navigate(Sessions)
@@ -250,6 +261,18 @@ fun TgxCodeRoot(
                         }
                     },
                     actions = {
+                        // Off the conversation, where the title needs the width and the
+                        // composer already says what the session is doing.
+                        if (!onConversation) {
+                            QuotaPill(quota, onClick = { quotaOpen = true })
+                            if (!onNotifications) {
+                                IconButton(onClick = { nav.navigate(Notifications) }) {
+                                    BadgedBox(badge = {
+                                        if (inbox.unread > 0) Badge { Text("${inbox.unread}") }
+                                    }) { Icon(Icons.Default.Notifications, contentDescription = "History") }
+                                }
+                            }
+                        }
                         ConnectionDot(connection, Modifier.padding(end = 8.dp))
                         IconButton(onClick = { nav.navigate(Settings) }) {
                             Icon(Icons.Default.Settings, contentDescription = "Settings")
@@ -430,6 +453,15 @@ fun TgxCodeRoot(
                         onMoveQueued = { id, by -> vm.moveQueued(sessionId, id, by) },
                     )
                 }
+                composable<Notifications> {
+                    NotificationsScreen(
+                        inbox = inbox,
+                        onOpenSession = { nav.navigate(Conversation(it)) },
+                        onMarkSessionRead = { vm.status.markRead(it) },
+                        onMarkAllRead = { vm.status.markRead(null) },
+                        onClear = vm.status::clear,
+                    )
+                }
                 composable<Settings> {
                     SettingsScreen(
                         state = settingsUi,
@@ -451,6 +483,15 @@ fun TgxCodeRoot(
     // it is its own window, so nothing in the layout above clips it.
     prSheet?.let { sheet ->
         PrSheet(state = sheet, onDismiss = vm::closePrSheet, onOpenUrl = openUrl)
+    }
+
+    if (quotaOpen) {
+        QuotaSheet(
+            quota = quota,
+            refreshing = refreshingQuota,
+            onRefresh = vm.status::refreshQuota,
+            onDismiss = { quotaOpen = false },
+        )
     }
 
     sessionSheet?.let { session ->

@@ -6,6 +6,7 @@ import com.twentygx.tgxcode.core.getOrNull
 import com.twentygx.tgxcode.core.isUnauthorized
 import com.twentygx.tgxcode.core.message
 import com.twentygx.tgxcode.data.model.Ask
+import com.twentygx.tgxcode.data.model.CardRunner
 import com.twentygx.tgxcode.data.model.CreateSessionRequest
 import com.twentygx.tgxcode.data.model.Decision
 import com.twentygx.tgxcode.data.model.Draft
@@ -632,6 +633,10 @@ class BridgeRepository(
             else -> if (delta.isUnauthorized) return setPaired(false)
         }
 
+        // `task-list` rides the stream, which is not arriving; this is the poll the
+        // docs name as its replacement, and only while a conversation is open.
+        loadChecklist(open.sessionId)
+
         stillPolling()
     }
 
@@ -776,8 +781,11 @@ class BridgeRepository(
             }
 
             // Info-level notices are dropped on purpose; only warnings interrupt.
+            // `rate_limit` repeats on every turn for as long as the limit holds, so a
+            // toast per notice stacks the same warning all afternoon. Dropped, as
+            // `web/app.js` does; the quota pill shows the state instead.
             is StreamEvent.Notice ->
-                if (event.level == "warn") {
+                if (event.level == "warn" && event.kind != "rate_limit") {
                     event.text?.let { _messages.emit(UserMessage(it, isError = true)) }
                 }
 
@@ -803,7 +811,31 @@ class BridgeRepository(
                 }
             }
 
-            is StreamEvent.AgentTail, is StreamEvent.AgentReset -> Unit
+            // Patch the row in place; neither is carried by `sessions-changed`.
+            is StreamEvent.StandingChanged -> patchSession(event.sessionId) {
+                it.copy(standing = event.standing)
+            }
+
+            is StreamEvent.RunnerStalled -> {
+                patchSession(event.sessionId) { s ->
+                    s.copy(runner = (s.runner ?: CardRunner()).copy(stalled = event.stalled))
+                }
+                currentIf(event.sessionId)?.let { open ->
+                    open.runner?.let { _conversation.value = open.copy(runner = it.copy(stalled = event.stalled)) }
+                }
+            }
+
+            // Carries its own sessionId, so a list for a conversation already left is
+            // dropped rather than drawn into the next one.
+            is StreamEvent.TaskListChanged -> currentIf(event.list.sessionId)?.let { open ->
+                _conversation.value = open.copy(checklist = event.list)
+            }
+
+            // The feature stores own these; they hear them on [events].
+            is StreamEvent.AgentTail, is StreamEvent.AgentReset,
+            is StreamEvent.QuotaChanged, is StreamEvent.NotificationFiled,
+            is StreamEvent.NotificationResolved, is StreamEvent.NotificationRead,
+            is StreamEvent.NotificationsCleared -> Unit
         }
     }
 
@@ -994,6 +1026,10 @@ class BridgeRepository(
         Tgx.d("suggestion $toolUseId changed on ${open.sessionId}")
     }
 
+    private fun patchSession(sessionId: String, change: (SessionSummary) -> SessionSummary) {
+        _sessions.value = _sessions.value.map { if (it.sessionId == sessionId) change(it) else it }
+    }
+
     private fun currentIf(sessionId: String?): Conversation? =
         _conversation.value?.takeIf { it.sessionId == sessionId }
 
@@ -1100,6 +1136,11 @@ class BridgeRepository(
         }
     }
 
+    private suspend fun loadChecklist(sessionId: String) {
+        val list = api.taskList(sessionId).getOrNull() ?: return
+        currentIf(sessionId)?.let { _conversation.value = it.copy(checklist = list) }
+    }
+
     /**
      * One session's PRs for the long-press sheet.
      *
@@ -1173,6 +1214,11 @@ class BridgeRepository(
                         // state, so the chip bar appears a beat later — which is what
                         // the desktop does too.
                         scope.launch { loadOpenPrs() }
+                        // The stream sends `task-list` on follow, but not necessarily on
+                        // a re-follow of the same session after a reset, and a polling
+                        // client has no stream at all. A read is cheap off the bridge's
+                        // 1s cache, so it is simply always made.
+                        scope.launch { loadChecklist(sessionId) }
                         return
                     }
 
@@ -1228,6 +1274,7 @@ class BridgeRepository(
                     // would vanish the moment somebody pressed "load all".
                     prs = open.prs,
                     prsGh = open.prsGh,
+                    checklist = open.checklist,
                 ).applyEvents(result.value.events, result.value.offset)
             }
             else -> _messages.emit(

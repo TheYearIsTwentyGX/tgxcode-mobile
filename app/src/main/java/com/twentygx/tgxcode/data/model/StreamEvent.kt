@@ -143,4 +143,51 @@ sealed interface StreamEvent {
         val sessionId: String? = null,
         val toolUseId: String? = null,
     ) : StreamEvent
+
+    /** `{sessionId, standing}` — patch that row; there is nothing to refetch. */
+    @Serializable
+    data class StandingChanged(val sessionId: String, val standing: Standing? = null) : StreamEvent
+
+    /**
+     * A busy turn crossed into or out of *stalled*. Sent once per crossing; `false` also
+     * comes when the turn ends any way at all, so it means "take the badge down".
+     */
+    @Serializable
+    data class RunnerStalled(
+        val sessionId: String,
+        val stalled: Boolean = false,
+        val lastActivityAt: Long? = null,
+        val busySince: Long? = null,
+        val stalledAfterMs: Long? = null,
+    ) : StreamEvent
+
+    /** The whole task-list payload, sent once on follow and then only when it moves. */
+    @Serializable
+    data class TaskListChanged(val list: TaskList) : StreamEvent
+
+    /** The whole `GET /api/quota` payload. Account-wide, so no `sessionId`. */
+    @Serializable
+    data class QuotaChanged(val quota: Quota) : StreamEvent
+
+    /** A whole notification row, just filed, with `unread` on it. */
+    @Serializable
+    data class NotificationFiled(val row: NotificationRow) : StreamEvent
+
+    @Serializable
+    data class NotificationResolved(
+        val id: String,
+        val outcome: String? = null,
+        val outcomeAt: Long? = null,
+    ) : StreamEvent
+
+    /** A watermark moved, here or in another window. `sessionId` null is "everything". */
+    @Serializable
+    data class NotificationRead(
+        val sessionId: String? = null,
+        val at: Long = 0,
+        val unread: Int = 0,
+    ) : StreamEvent
+
+    @Serializable
+    data class NotificationsCleared(val at: Long? = null) : StreamEvent
 }
