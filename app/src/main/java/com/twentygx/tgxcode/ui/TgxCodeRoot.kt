@@ -57,6 +57,7 @@ import com.twentygx.tgxcode.ui.common.DegradedBanner
 import com.twentygx.tgxcode.ui.common.RemoteBanner
 import com.twentygx.tgxcode.ui.conversation.ComposerControls
 import com.twentygx.tgxcode.ui.conversation.ConversationScreen
+import com.twentygx.tgxcode.ui.conversation.SubagentScreen
 import com.twentygx.tgxcode.ui.conversation.UserTurnActions
 import com.twentygx.tgxcode.ui.newsession.NewSessionScreen
 import com.twentygx.tgxcode.ui.newsession.recentDirs
@@ -81,6 +82,7 @@ import kotlinx.serialization.Serializable
 @Serializable object Settings
 @Serializable object Notifications
 @Serializable data class Conversation(val sessionId: String)
+@Serializable data class Subagent(val sessionId: String, val toolUseId: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,6 +123,8 @@ fun TgxCodeRoot(
     val refreshingQuota by vm.status.refreshingQuota.collectAsStateWithLifecycle()
     val inbox by vm.status.inbox.collectAsStateWithLifecycle()
     var quotaOpen by rememberSaveable { mutableStateOf(false) }
+    var turnsOpen by rememberSaveable { mutableStateOf(false) }
+    val agentView by vm.repo.agentView.collectAsStateWithLifecycle()
 
     var filter by rememberSaveable { mutableStateOf("") }
     var showArchived by rememberSaveable { mutableStateOf(false) }
@@ -175,15 +179,17 @@ fun TgxCodeRoot(
     val onConversation = destination?.hasRoute(Conversation::class) == true
     val onSettings = destination?.hasRoute(Settings::class) == true
     val onNotifications = destination?.hasRoute(Notifications::class) == true
+    val onSubagent = destination?.hasRoute(Subagent::class) == true
     // Hidden on a conversation, exactly like mobile.css hides the tab bar there —
     // one screen at a time is the whole shape of this surface.
-    val showTabs = !onConversation && !onSettings && !onNotifications
+    val showTabs = !onConversation && !onSettings && !onNotifications && !onSubagent
 
     val title = when {
         onConversation -> conversation?.summary?.displayTitle
             ?: if (opening != null) "Starting…" else "Loading…"
         onSettings -> "Settings"
         onNotifications -> "History"
+        onSubagent -> agentView?.title ?: "Subagent"
         destination?.hasRoute(Tasks::class) == true -> "Tasks"
         destination?.hasRoute(NewSession::class) == true -> "Start a session"
         else -> "Sessions"
@@ -253,9 +259,10 @@ fun TgxCodeRoot(
                         )
                     },
                     navigationIcon = {
-                        if (onConversation || onSettings || onNotifications) {
+                        if (onConversation || onSettings || onNotifications || onSubagent) {
                             IconButton(onClick = {
                                 if (onConversation) vm.closeConversation()
+                                if (onSubagent) vm.closeAgent()
                                 if (!nav.popBackStack()) nav.navigate(Sessions)
                             }) { Text("‹", style = MaterialTheme.typography.titleMedium) }
                         }
@@ -263,7 +270,12 @@ fun TgxCodeRoot(
                     actions = {
                         // Off the conversation, where the title needs the width and the
                         // composer already says what the session is doing.
-                        if (!onConversation) {
+                        if (onConversation && conversation?.let { it.turns.isNotEmpty() || it.events.isNotEmpty() } == true) {
+                            IconButton(onClick = { turnsOpen = true }) {
+                                Icon(Icons.Default.List, contentDescription = "Turns")
+                            }
+                        }
+                        if (!onConversation && !onSubagent) {
                             QuotaPill(quota, onClick = { quotaOpen = true })
                             if (!onNotifications) {
                                 IconButton(onClick = { nav.navigate(Notifications) }) {
@@ -451,6 +463,39 @@ fun TgxCodeRoot(
                         },
                         onDropQueued = { vm.dropQueued(sessionId, it) },
                         onMoveQueued = { id, by -> vm.moveQueued(sessionId, id, by) },
+                        onLoadEarlier = vm::loadEarlier,
+                        onOpenAgent = { toolUseId, title ->
+                            vm.openAgent(sessionId, toolUseId, title)
+                            nav.navigate(Subagent(sessionId, toolUseId))
+                        },
+                        turnsOpen = turnsOpen,
+                        onTurnsOpenChanged = { turnsOpen = it },
+                    )
+                }
+                composable<Subagent> { backStackEntry ->
+                    val route = backStackEntry.toRoute<Subagent>()
+                    // Re-entered on the way back from a nested subagent, whose open
+                    // replaced this one's view — so it asks for its own again.
+                    LaunchedEffect(route.toolUseId) {
+                        if (vm.repo.agentView.value?.toolUseId != route.toolUseId) {
+                            vm.openAgent(route.sessionId, route.toolUseId, null)
+                        }
+                    }
+                    // The system back gesture skips the top bar's arrow, so the follow is
+                    // dropped here too — otherwise the bridge keeps tailing an agent
+                    // nobody is looking at.
+                    androidx.activity.compose.BackHandler {
+                        vm.closeAgent()
+                        nav.popBackStack()
+                    }
+                    SubagentScreen(
+                        view = agentView?.takeIf { it.toolUseId == route.toolUseId },
+                        expandedTools = vm.expandedTools,
+                        onToggleTool = vm::toggleTool,
+                        onOpenAgent = { toolUseId, title ->
+                            vm.openAgent(route.sessionId, toolUseId, title)
+                            nav.navigate(Subagent(route.sessionId, toolUseId))
+                        },
                     )
                 }
                 composable<Notifications> {

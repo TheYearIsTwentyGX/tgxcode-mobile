@@ -20,6 +20,8 @@ import com.twentygx.tgxcode.data.model.TaskList
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.PrsPayload
+import com.twentygx.tgxcode.data.model.RangeResponse
+import com.twentygx.tgxcode.data.model.SubagentResponse
 import com.twentygx.tgxcode.data.model.QueueReorderRequest
 import com.twentygx.tgxcode.data.model.QueueWriteResponse
 import com.twentygx.tgxcode.data.model.SendRequest
@@ -83,11 +85,32 @@ class BridgeApi(
      *   60-turn session is ~1,800 events and half a megabyte of JSON, and none of
      *   the first 1,500 is why someone opened their phone.
      */
-    suspend fun session(sessionId: String, tail: Int? = null): ApiResult<SessionDetail> =
+    suspend fun session(sessionId: String, tail: Int? = null, turns: Int? = null): ApiResult<SessionDetail> =
         get(
             "api/sessions/${sessionId.encoded()}",
             serializer(),
             "tail" to tail?.toString(),
+            "turns" to turns?.toString(),
+        )
+
+    /**
+     * The stretch above a window opened with `?turns=`. Both ends must be 0 or an
+     * `offset` from `turns[]`; anything else is a 400.
+     */
+    suspend fun range(sessionId: String, from: Long, to: Long): ApiResult<RangeResponse> =
+        get(
+            "api/sessions/${sessionId.encoded()}/range",
+            serializer(),
+            "from" to from.toString(),
+            "to" to to.toString(),
+        )
+
+    suspend fun subagent(sessionId: String, toolUseId: String, offset: Long = 0): ApiResult<SubagentResponse> =
+        get(
+            "api/sessions/${sessionId.encoded()}/subagent",
+            serializer(),
+            "toolUseId" to toolUseId,
+            "offset" to offset.toString(),
         )
 
     /**

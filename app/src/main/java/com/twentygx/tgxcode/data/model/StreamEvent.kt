@@ -31,16 +31,17 @@ sealed interface StreamEvent {
     @Serializable
     data class Reset(val sessionId: String) : StreamEvent
 
+    /** The followed subagent's new lines, keyed by the tool call that spawned it. */
     @Serializable
     data class AgentTail(
         val sessionId: String,
-        val agent: String? = null,
+        val toolUseId: String? = null,
         val events: List<TranscriptEvent> = emptyList(),
         val offset: Long = 0,
     ) : StreamEvent
 
     @Serializable
-    data class AgentReset(val sessionId: String, val agent: String? = null) : StreamEvent
+    data class AgentReset(val sessionId: String, val toolUseId: String? = null) : StreamEvent
 
     /** Sent only when the board has actually changed. */
     @Serializable

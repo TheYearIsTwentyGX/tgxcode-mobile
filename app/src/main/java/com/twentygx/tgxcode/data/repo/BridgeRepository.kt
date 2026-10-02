@@ -5,6 +5,7 @@ import com.twentygx.tgxcode.core.Tgx
 import com.twentygx.tgxcode.core.getOrNull
 import com.twentygx.tgxcode.core.isUnauthorized
 import com.twentygx.tgxcode.core.message
+import com.twentygx.tgxcode.data.model.AgentFollow
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.CardRunner
 import com.twentygx.tgxcode.data.model.CreateSessionRequest
@@ -27,6 +28,7 @@ import com.twentygx.tgxcode.data.model.SubscribeRequest
 import com.twentygx.tgxcode.data.model.SuggestedTask
 import com.twentygx.tgxcode.data.model.SuggestionActRequest
 import com.twentygx.tgxcode.data.model.TaskStatus
+import com.twentygx.tgxcode.data.model.TurnMark
 import com.twentygx.tgxcode.data.net.BridgeApi
 import com.twentygx.tgxcode.data.net.BridgeSse
 import com.twentygx.tgxcode.data.net.SseSignal
@@ -106,6 +108,29 @@ enum class ConnState { Offline, Connecting, Live, Polling, NotPaired, Unconfigur
 /** Something worth a toast. */
 data class UserMessage(val text: String, val isError: Boolean = false)
 
+/**
+ * Where "Load earlier" should start: the offset of the [count]th turn of yours above the
+ * window, or 0 when there are fewer than that left — so the last load reaches the top.
+ *
+ * Only `turn` entries count; a plan's or question's offset is its turn's, so counting
+ * those too would load fewer turns than it says.
+ */
+internal fun earlierStart(turns: List<TurnMark>, windowStart: Long, count: Int): Long {
+    val above = turns.filter { it.isTurn && it.offset < windowStart }
+    return if (above.size <= count) 0 else above[above.size - count].offset
+}
+
+/** A subagent's transcript on screen. */
+data class AgentView(
+    /** The session whose tool call spawned it — what every route here is keyed by. */
+    val parentId: String,
+    val toolUseId: String,
+    val title: String? = null,
+    val agentType: String? = null,
+    val log: Conversation,
+    val loading: Boolean = false,
+)
+
 /** Messages that never became a turn, handed back for the composer of [sessionId]. */
 data class Unsent(val sessionId: String, val texts: List<String>, val kind: String? = null)
 
@@ -148,6 +173,14 @@ class BridgeRepository(
 
     private val _conversation = MutableStateFlow<Conversation?>(null)
     val conversation: StateFlow<Conversation?> = _conversation.asStateFlow()
+
+    /**
+     * The subagent transcript on screen, if any. Its events live in a [Conversation] so
+     * the same merge rules and the same renderers serve both — a subagent's transcript
+     * is a transcript.
+     */
+    private val _agentView = MutableStateFlow<AgentView?>(null)
+    val agentView: StateFlow<AgentView?> = _agentView.asStateFlow()
 
     /** The session currently being opened, so the screen can say what it is doing. */
     private val _opening = MutableStateFlow<String?>(null)
@@ -299,10 +332,14 @@ class BridgeRepository(
 
     companion object {
         /**
-         * `?tail=120`. A 60-turn session is ~1,800 events and half a megabyte of
-         * JSON, and none of the first 1,500 is why someone opened their phone.
+         * `?turns=8`, which is what the desktop opens with. Unlike `?tail=`, this reads
+         * less on the bridge as well as sending less — the turn index is cached per
+         * transcript — and it never cuts a turn in half.
          */
-        const val TAIL = 120
+        const val TURNS = 8
+
+        /** How many more of your turns "Load earlier" brings in at a time. */
+        const val EARLIER_TURNS = 8
 
         /**
          * How long to keep trying a freshly created session. Measured at ~3.5s on a
@@ -637,6 +674,19 @@ class BridgeRepository(
         // docs name as its replacement, and only while a conversation is open.
         loadChecklist(open.sessionId)
 
+        // And the subagent on screen, which `agent-tail` would otherwise be bringing.
+        agentIf(open.sessionId, _agentView.value?.toolUseId)?.let { view ->
+            api.subagent(view.parentId, view.toolUseId, view.log.offset).getOrNull()?.let { delta ->
+                if (delta.reset) {
+                    openAgent(view.parentId, view.toolUseId, view.title)
+                } else {
+                    agentIf(view.parentId, view.toolUseId)?.let {
+                        _agentView.value = it.copy(log = it.log.applyEvents(delta.events, delta.offset))
+                    }
+                }
+            }
+        }
+
         stillPolling()
     }
 
@@ -831,8 +881,15 @@ class BridgeRepository(
                 _conversation.value = open.copy(checklist = event.list)
             }
 
+            is StreamEvent.AgentTail -> agentIf(event.sessionId, event.toolUseId)?.let { view ->
+                _agentView.value = view.copy(log = view.log.applyEvents(event.events, event.offset))
+            }
+
+            is StreamEvent.AgentReset -> agentIf(event.sessionId, event.toolUseId)?.let { view ->
+                openAgent(view.parentId, view.toolUseId, view.title)
+            }
+
             // The feature stores own these; they hear them on [events].
-            is StreamEvent.AgentTail, is StreamEvent.AgentReset,
             is StreamEvent.QuotaChanged, is StreamEvent.NotificationFiled,
             is StreamEvent.NotificationResolved, is StreamEvent.NotificationRead,
             is StreamEvent.NotificationsCleared -> Unit
@@ -974,11 +1031,15 @@ class BridgeRepository(
     private suspend fun subscribe() {
         val id = clientId ?: return
         val open = _conversation.value
+        // A subagent is followed *alongside* its session, never instead of it — and
+        // only while that session is the one followed.
+        val agent = _agentView.value?.takeIf { it.parentId == open?.sessionId }
         val result = api.subscribe(
             SubscribeRequest(
                 clientId = id,
                 sessionId = open?.sessionId,
                 offset = open?.offset ?: 0,
+                agent = agent?.let { AgentFollow(it.toolUseId, it.log.offset) },
                 overview = true,
             ),
         )
@@ -1024,6 +1085,61 @@ class BridgeRepository(
             _conversation.value = still.copy(suggestions = fresh.suggestions)
         }
         Tgx.d("suggestion $toolUseId changed on ${open.sessionId}")
+    }
+
+    private fun agentIf(sessionId: String?, toolUseId: String?): AgentView? =
+        _agentView.value?.takeIf { it.parentId == sessionId && it.toolUseId == toolUseId }
+
+    /**
+     * Open one subagent's transcript, addressed by the tool call that spawned it, and
+     * follow it alongside its session.
+     *
+     * A subagent writes to its own file and the parent records nothing between
+     * spawning it and collecting the result — so without this follow, a running agent
+     * looks frozen.
+     */
+    suspend fun openAgent(sessionId: String, toolUseId: String, title: String? = null) {
+        _agentView.value = AgentView(
+            parentId = sessionId,
+            toolUseId = toolUseId,
+            title = title,
+            log = Conversation(sessionId = toolUseId, summary = SessionSummary(sessionId = toolUseId)),
+            loading = true,
+        )
+        when (val result = api.subagent(sessionId, toolUseId)) {
+            is ApiResult.Ok -> {
+                val agent = result.value
+                agentIf(sessionId, toolUseId)?.let { view ->
+                    _agentView.value = view.copy(
+                        title = title ?: agent.description ?: agent.agentType,
+                        agentType = agent.agentType,
+                        log = view.log.copy(events = emptyList(), indexById = emptyMap(), offset = 0)
+                            .applyEvents(agent.events, agent.offset),
+                        loading = false,
+                    )
+                }
+                subscribe()
+            }
+            else -> {
+                agentIf(sessionId, toolUseId)?.let { _agentView.value = it.copy(loading = false) }
+                _messages.emit(
+                    UserMessage(
+                        if (result is ApiResult.Http && result.status == 404) {
+                            "There is no transcript for that subagent"
+                        } else {
+                            "Could not open the subagent: ${result.message()}"
+                        },
+                        isError = true,
+                    ),
+                )
+            }
+        }
+    }
+
+    suspend fun closeAgent() {
+        if (_agentView.value == null) return
+        _agentView.value = null
+        subscribe()
     }
 
     private fun patchSession(sessionId: String, change: (SessionSummary) -> SessionSummary) {
@@ -1193,7 +1309,7 @@ class BridgeRepository(
                 // The user moved on, or another open superseded this one.
                 if (_opening.value != sessionId) return
 
-                when (val result = api.session(sessionId, tail = TAIL)) {
+                when (val result = api.session(sessionId, turns = TURNS)) {
                     is ApiResult.Ok -> {
                         val detail = result.value
                         _conversation.value = Conversation(
@@ -1202,6 +1318,10 @@ class BridgeRepository(
                             offset = detail.offset,
                             truncated = detail.truncated,
                             runner = detail.runner,
+                            turns = detail.turns,
+                            // Set before the events go in, so a result whose call is
+                            // above the window is held rather than dropped.
+                            windowStart = detail.window?.start ?: 0,
                             // The ask that predates the connection.
                             // `pendingPermission` has no sessionId of its own, so
                             // stamp one in — without it every answer would POST to a
@@ -1255,7 +1375,34 @@ class BridgeRepository(
         }
     }
 
-    /** The "N earlier events — load all" button. */
+    /**
+     * "Load earlier": the next [EARLIER_TURNS] of your turns above the window, by
+     * `/range`. Falls back to [loadWholeTranscript] against a bridge that sent no turn
+     * index, where a `?tail=` cut is the only thing there is to undo.
+     *
+     * @param from load from this turn offset instead — a jump to a turn not yet in hand.
+     */
+    suspend fun loadEarlier(from: Long? = null) {
+        val open = _conversation.value ?: return
+        if (open.turns.isEmpty()) return loadWholeTranscript()
+        val to = open.windowStart
+        if (to <= 0) return
+        val start = from?.coerceAtMost(to) ?: earlierStart(open.turns, to, EARLIER_TURNS)
+        when (val result = api.range(open.sessionId, start, to)) {
+            is ApiResult.Ok -> currentIf(open.sessionId)?.let { still ->
+                // Another load may have landed in the meantime; only the one that
+                // still meets the window is applied.
+                if (still.windowStart == to) {
+                    _conversation.value = still.prependEvents(result.value.events, result.value.from)
+                }
+            }
+            else -> _messages.emit(
+                UserMessage("Could not load earlier turns: ${result.message()}", isError = true),
+            )
+        }
+    }
+
+    /** The "N earlier events — load all" button, for a bridge with no turn index. */
     suspend fun loadWholeTranscript() {
         val open = _conversation.value ?: return
         when (val result = api.session(open.sessionId, tail = null)) {
@@ -1285,6 +1432,7 @@ class BridgeRepository(
 
     suspend fun closeSession() {
         _conversation.value = null
+        _agentView.value = null
         subscribe()
     }
 

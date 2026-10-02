@@ -243,6 +243,13 @@ class AppViewModel(
 
     fun loadAll() = viewModelScope.launch { repo.loadWholeTranscript() }
 
+    fun loadEarlier(from: Long?) = viewModelScope.launch { repo.loadEarlier(from) }
+
+    fun openAgent(sessionId: String, toolUseId: String, title: String?) =
+        viewModelScope.launch { repo.openAgent(sessionId, toolUseId, title) }
+
+    fun closeAgent() = viewModelScope.launch { repo.closeAgent() }
+
     fun setMode(sessionId: String, mode: String) {
         repo.setPendingMode(sessionId, mode)
         picks.intValue++
