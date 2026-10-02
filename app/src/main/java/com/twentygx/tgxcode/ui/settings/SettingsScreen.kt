@@ -52,6 +52,8 @@ fun SettingsScreen(
     onForget: () -> Unit,
     onStayConnectedChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    /** Null until paired: the snippets live on the bridge, so there is nothing to edit before. */
+    onOpenSnippets: (() -> Unit)? = null,
 ) {
     Column(
         modifier
@@ -60,6 +62,12 @@ fun SettingsScreen(
             .padding(Metrics.ScreenPadding),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        onOpenSnippets?.let {
+            androidx.compose.material3.OutlinedButton(
+                onClick = it,
+                modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.TouchTarget),
+            ) { Text("Snippets…") }
+        }
         Text(
             "Paste the pairing link from the desktop",
             style = MaterialTheme.typography.bodyLarge,

@@ -892,7 +892,9 @@ class BridgeRepository(
             // The feature stores own these; they hear them on [events].
             is StreamEvent.QuotaChanged, is StreamEvent.NotificationFiled,
             is StreamEvent.NotificationResolved, is StreamEvent.NotificationRead,
-            is StreamEvent.NotificationsCleared -> Unit
+            is StreamEvent.NotificationsCleared,
+            is StreamEvent.LaterChanged, is StreamEvent.SnippetsChanged,
+            is StreamEvent.SchedulesChanged, is StreamEvent.SlashCommandsChanged -> Unit
         }
     }
 

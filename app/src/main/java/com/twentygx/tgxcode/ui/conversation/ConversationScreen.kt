@@ -86,6 +86,9 @@ fun ConversationScreen(
     onOpenAgent: ((toolUseId: String, title: String?) -> Unit)? = null,
     turnsOpen: Boolean = false,
     onTurnsOpenChanged: (Boolean) -> Unit = {},
+    /** This session's scheduled messages, for the strip above the composer. */
+    later: List<com.twentygx.tgxcode.data.model.LaterMessage> = emptyList(),
+    onOpenLater: () -> Unit = {},
 ) {
     if (conversation == null) {
         // A just-created session is not readable until Claude Code has written its
@@ -330,6 +333,8 @@ fun ConversationScreen(
             busy = answering,
             onAnswer = onAnswer,
         )
+
+        LaterStrip(later, onOpenLater)
 
         Composer(
             text = draft,

@@ -11,11 +11,15 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Badge
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,11 +56,15 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.twentygx.tgxcode.data.repo.ConnState
 import com.twentygx.tgxcode.data.repo.NavCommand
+import com.twentygx.tgxcode.data.repo.appliesIn
 import com.twentygx.tgxcode.ui.common.ConnectionDot
 import com.twentygx.tgxcode.ui.common.DegradedBanner
 import com.twentygx.tgxcode.ui.common.RemoteBanner
 import com.twentygx.tgxcode.ui.conversation.ComposerControls
+import com.twentygx.tgxcode.ui.conversation.ChangesSheet
 import com.twentygx.tgxcode.ui.conversation.ConversationScreen
+import com.twentygx.tgxcode.ui.conversation.LaterSheet
+import com.twentygx.tgxcode.ui.conversation.ScheduleSendDialog
 import com.twentygx.tgxcode.ui.conversation.SubagentScreen
 import com.twentygx.tgxcode.ui.conversation.UserTurnActions
 import com.twentygx.tgxcode.ui.newsession.NewSessionScreen
@@ -69,6 +77,8 @@ import com.twentygx.tgxcode.ui.tasks.TaskActions
 import com.twentygx.tgxcode.ui.tasks.TasksScreen
 import com.twentygx.tgxcode.ui.settings.NotPairedScreen
 import com.twentygx.tgxcode.ui.settings.SettingsScreen
+import com.twentygx.tgxcode.ui.schedules.SchedulesScreen
+import com.twentygx.tgxcode.ui.snippets.SnippetsScreen
 import com.twentygx.tgxcode.ui.status.NotificationsScreen
 import com.twentygx.tgxcode.ui.status.QuotaPill
 import com.twentygx.tgxcode.ui.status.QuotaSheet
@@ -81,6 +91,8 @@ import kotlinx.serialization.Serializable
 @Serializable object NewSession
 @Serializable object Settings
 @Serializable object Notifications
+@Serializable object Schedules
+@Serializable object Snippets
 @Serializable data class Conversation(val sessionId: String)
 @Serializable data class Subagent(val sessionId: String, val toolUseId: String)
 
@@ -125,6 +137,13 @@ fun TgxCodeRoot(
     var quotaOpen by rememberSaveable { mutableStateOf(false) }
     var turnsOpen by rememberSaveable { mutableStateOf(false) }
     val agentView by vm.repo.agentView.collectAsStateWithLifecycle()
+    val later by vm.workspace.later.collectAsStateWithLifecycle()
+    val snippets by vm.workspace.snippets.collectAsStateWithLifecycle()
+    val slash by vm.slash.collectAsStateWithLifecycle()
+    var filesOpen by rememberSaveable { mutableStateOf(false) }
+    var laterOpen by rememberSaveable { mutableStateOf(false) }
+    var moving by remember { mutableStateOf<com.twentygx.tgxcode.data.model.LaterMessage?>(null) }
+    var overflowOpen by remember { mutableStateOf(false) }
 
     var filter by rememberSaveable { mutableStateOf("") }
     var showArchived by rememberSaveable { mutableStateOf(false) }
@@ -180,9 +199,13 @@ fun TgxCodeRoot(
     val onSettings = destination?.hasRoute(Settings::class) == true
     val onNotifications = destination?.hasRoute(Notifications::class) == true
     val onSubagent = destination?.hasRoute(Subagent::class) == true
+    val onSchedules = destination?.hasRoute(Schedules::class) == true
+    val onSnippets = destination?.hasRoute(Snippets::class) == true
+    val onTasks = destination?.hasRoute(Tasks::class) == true
     // Hidden on a conversation, exactly like mobile.css hides the tab bar there —
     // one screen at a time is the whole shape of this surface.
-    val showTabs = !onConversation && !onSettings && !onNotifications && !onSubagent
+    val pushed = onConversation || onSettings || onNotifications || onSubagent || onSchedules || onSnippets
+    val showTabs = !pushed
 
     val title = when {
         onConversation -> conversation?.summary?.displayTitle
@@ -190,6 +213,8 @@ fun TgxCodeRoot(
         onSettings -> "Settings"
         onNotifications -> "History"
         onSubagent -> agentView?.title ?: "Subagent"
+        onSchedules -> "Schedules"
+        onSnippets -> "Snippets"
         destination?.hasRoute(Tasks::class) == true -> "Tasks"
         destination?.hasRoute(NewSession::class) == true -> "Start a session"
         else -> "Sessions"
@@ -259,7 +284,7 @@ fun TgxCodeRoot(
                         )
                     },
                     navigationIcon = {
-                        if (onConversation || onSettings || onNotifications || onSubagent) {
+                        if (pushed) {
                             IconButton(onClick = {
                                 if (onConversation) vm.closeConversation()
                                 if (onSubagent) vm.closeAgent()
@@ -273,6 +298,28 @@ fun TgxCodeRoot(
                         if (onConversation && conversation?.let { it.turns.isNotEmpty() || it.events.isNotEmpty() } == true) {
                             IconButton(onClick = { turnsOpen = true }) {
                                 Icon(Icons.Default.List, contentDescription = "Turns")
+                            }
+                        }
+                        if (onConversation && conversation != null) {
+                            Box {
+                                IconButton(onClick = { overflowOpen = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "More")
+                                }
+                                DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text("Changes and scratchpad") },
+                                        onClick = { overflowOpen = false; filesOpen = true },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Scheduled messages") },
+                                        onClick = { overflowOpen = false; laterOpen = true },
+                                    )
+                                }
+                            }
+                        }
+                        if (onTasks) {
+                            IconButton(onClick = { nav.navigate(Schedules) }) {
+                                Icon(Icons.Default.DateRange, contentDescription = "Schedules")
                             }
                         }
                         if (!onConversation && !onSubagent) {
@@ -454,6 +501,15 @@ fun TgxCodeRoot(
                             onEffortChanged = { vm.setEffort(sessionId, it) },
                             branchBanner = branch?.takeIf { it.sessionId == sessionId }?.banner,
                             onCancelBranch = vm::cancelBranch,
+                            snippets = remember(snippets, conversation?.summary?.cwd) {
+                                val cwd = conversation?.summary?.cwd
+                                snippets.snippets.filter { it.appliesIn(cwd) }
+                            },
+                            snippetGroups = snippets.groups,
+                            onSendCanned = { text, snippetMode -> vm.sendCanned(sessionId, text, snippetMode) },
+                            slashCommands = slash,
+                            onWantSlashCommands = { vm.loadSlashCommands(sessionId) },
+                            onScheduleSend = { at, chosen -> vm.scheduleSend(sessionId, at, chosen) },
                         ),
                         userActions = remember(sessionId) {
                             UserTurnActions(
@@ -470,6 +526,8 @@ fun TgxCodeRoot(
                         },
                         turnsOpen = turnsOpen,
                         onTurnsOpenChanged = { turnsOpen = it },
+                        later = later.filter { it.sessionId == sessionId },
+                        onOpenLater = { laterOpen = true },
                     )
                 }
                 composable<Subagent> { backStackEntry ->
@@ -507,6 +565,32 @@ fun TgxCodeRoot(
                         onClear = vm.status::clear,
                     )
                 }
+                composable<Schedules> {
+                    val schedules by vm.workspace.schedules.collectAsStateWithLifecycle()
+                    LaunchedEffect(Unit) { vm.workspace.loadSchedules() }
+                    SchedulesScreen(
+                        schedules = schedules,
+                        dirs = remember(sessions) { recentDirs(sessions) },
+                        modes = health?.offeredModes().orEmpty(),
+                        api = vm.api,
+                        onSetEnabled = vm::setScheduleEnabled,
+                        onRun = { vm.runSchedule(it) { id -> nav.navigate(Conversation(id)) } },
+                        onDelete = { vm.workspace.deleteSchedule(it.id) },
+                        onSave = vm::saveSchedule,
+                        onOpenSession = { nav.navigate(Conversation(it)) },
+                    )
+                }
+                composable<Snippets> {
+                    SnippetsScreen(
+                        payload = snippets,
+                        modes = health?.offeredModes().orEmpty(),
+                        onSave = vm::saveSnippet,
+                        onDelete = { vm.workspace.deleteSnippet(it.id) },
+                        onMove = vm.workspace::moveSnippet,
+                        onSaveGroup = vm::saveSnippetGroup,
+                        onDeleteGroup = { vm.workspace.deleteGroup(it.id) },
+                    )
+                }
                 composable<Settings> {
                     SettingsScreen(
                         state = settingsUi,
@@ -517,6 +601,7 @@ fun TgxCodeRoot(
                         onSave = vm::save,
                         onForget = vm::forget,
                         onStayConnectedChanged = onStayConnected,
+                        onOpenSnippets = { nav.navigate(Snippets) }.takeIf { connection != ConnState.NotPaired && connection != ConnState.Unconfigured },
                     )
                 }
             }
@@ -528,6 +613,26 @@ fun TgxCodeRoot(
     // it is its own window, so nothing in the layout above clips it.
     prSheet?.let { sheet ->
         PrSheet(state = sheet, onDismiss = vm::closePrSheet, onOpenUrl = openUrl)
+    }
+
+    val openId = conversation?.sessionId
+    if (filesOpen && openId != null && onConversation) {
+        ChangesSheet(api = vm.api, sessionId = openId, onDismiss = { filesOpen = false })
+    }
+    if (laterOpen && openId != null && onConversation) {
+        LaterSheet(
+            messages = later.filter { it.sessionId == openId },
+            onSendNow = { vm.workspace.sendMessageNow(it.id) },
+            onReschedule = { moving = it },
+            onCancel = { vm.workspace.cancelMessage(it.id) },
+            onDismiss = { laterOpen = false },
+        )
+    }
+    moving?.let { message ->
+        ScheduleSendDialog(mode = message.permissionMode, modes = listOf(message.permissionMode)) { picked ->
+            moving = null
+            if (picked != null) vm.rescheduleMessage(message.id, picked.first)
+        }
     }
 
     if (quotaOpen) {

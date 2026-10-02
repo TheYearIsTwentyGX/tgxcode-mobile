@@ -7,6 +7,7 @@ import com.twentygx.tgxcode.data.net.BridgeConfig
 import com.twentygx.tgxcode.data.net.BridgeSse
 import com.twentygx.tgxcode.data.repo.BridgeRepository
 import com.twentygx.tgxcode.data.repo.StatusStore
+import com.twentygx.tgxcode.data.repo.WorkspaceStore
 import com.twentygx.tgxcode.data.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +48,9 @@ class AppContainer(context: Context) {
 
     /** Quota and the notification log — account-wide, hung off [repository]'s fan-out. */
     val status = StatusStore(api, repository, appScope)
+
+    /** Scheduled messages, snippets and schedules — whole payloads, pushed. */
+    val workspace = WorkspaceStore(api, repository, appScope)
 
     /** Called from the connectivity callback: pooled sockets outlive their network. */
     fun onNetworkChanged() = clients.evictPooledConnections()
