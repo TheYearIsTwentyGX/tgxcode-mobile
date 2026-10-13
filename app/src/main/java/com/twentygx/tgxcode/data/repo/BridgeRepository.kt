@@ -5,6 +5,7 @@ import com.twentygx.tgxcode.core.Tgx
 import com.twentygx.tgxcode.core.getOrNull
 import com.twentygx.tgxcode.core.isUnauthorized
 import com.twentygx.tgxcode.core.message
+import com.twentygx.tgxcode.data.model.AttachmentRef
 import com.twentygx.tgxcode.data.model.AgentFollow
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.CardRunner
@@ -86,6 +87,7 @@ internal fun sendBody(
     effort: String? = null,
     fork: Boolean = false,
     fromUuid: String? = null,
+    attachments: List<AttachmentRef> = emptyList(),
 ): SendRequest = SendRequest(
     text = text,
     permissionMode = mode,
@@ -93,6 +95,7 @@ internal fun sendBody(
     effort = effort,
     fork = (fork || fromUuid != null).takeIf { it },
     fromUuid = fromUuid,
+    attachments = attachments.takeIf { it.isNotEmpty() },
 )
 
 /**
@@ -1457,6 +1460,7 @@ class BridgeRepository(
      *   no way to ask a live process to drop its model — so it is left out.
      * @param effort always sent: `""` is `inherit` and *is* honoured. See [SendRequest].
      * @param fromUuid Edit and branch — the turn's own id. Implies [fork].
+     * @param attachments already uploaded to this session; [text] may then be empty.
      * @return the text back if it did not send, so the composer can restore it.
      */
     suspend fun send(
@@ -1467,11 +1471,12 @@ class BridgeRepository(
         effort: String? = null,
         fork: Boolean = false,
         fromUuid: String? = null,
+        attachments: List<AttachmentRef> = emptyList(),
     ): String? {
         // permissionMode is always sent, never conditionally — an absent one
         // normalises to `auto` server-side, so omitting it would quietly drop a
         // session out of acceptEdits on every message.
-        val body = sendBody(text, mode, model, effort, fork, fromUuid)
+        val body = sendBody(text, mode, model, effort, fork, fromUuid, attachments)
         return when (val result = api.send(sessionId, body)) {
             is ApiResult.Ok -> {
                 pendingModes.remove(sessionId)
@@ -1707,6 +1712,7 @@ class BridgeRepository(
         test: Boolean,
         model: String? = null,
         effort: String? = null,
+        attachments: List<AttachmentRef> = emptyList(),
     ): Result<String> {
         val body = CreateSessionRequest(
             cwd = cwd,
@@ -1715,6 +1721,7 @@ class BridgeRepository(
             test = test,
             model = model?.takeIf { it.isNotBlank() },
             effort = effort?.takeIf { it.isNotBlank() },
+            attachments = attachments.takeIf { it.isNotEmpty() },
         )
         return when (val result = api.createSession(body)) {
             is ApiResult.Ok -> Result.success(result.value.sessionId)

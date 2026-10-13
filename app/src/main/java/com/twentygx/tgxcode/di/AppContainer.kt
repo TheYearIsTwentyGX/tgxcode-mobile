@@ -1,6 +1,8 @@
 package com.twentygx.tgxcode.di
 
 import android.content.Context
+import com.twentygx.tgxcode.data.attach.AttachmentSource
+import com.twentygx.tgxcode.data.attach.Uploader
 import com.twentygx.tgxcode.data.net.BridgeApi
 import com.twentygx.tgxcode.data.net.BridgeClients
 import com.twentygx.tgxcode.data.net.BridgeConfig
@@ -51,6 +53,12 @@ class AppContainer(context: Context) {
 
     /** Scheduled messages, snippets and schedules — whole payloads, pushed. */
     val workspace = WorkspaceStore(api, repository, appScope)
+
+    /** Reads picked files off the phone. */
+    val attachmentSource = AttachmentSource(appContext)
+
+    /** Sends them up, one per request. */
+    val uploader = Uploader(attachmentSource, api)
 
     /** Called from the connectivity callback: pooled sockets outlive their network. */
     fun onNetworkChanged() = clients.evictPooledConnections()

@@ -394,6 +394,7 @@ they now appear here, and where to find each one:
 | Schedules | the calendar icon on the Tasks tab | only changed fields are PATCHed, so a `dontAsk` schedule can still be paused from here |
 | Slash commands | type `/` | |
 | Project colours | row stripe, card dot, a rule under the conversation's top bar | read-only: `PUT /api/prefs` is refused to remote callers |
+| Attachments | the + beside the message box, and on the New tab; images and 📎 files in the transcript | Photo (the system photo picker) or File (the document picker), up to five a message; needs a bridge with [TGXCode#206](https://github.com/TheYearIsTwentyGX/TGXCode/pull/206), which lets a remote caller upload at a 10MB cap. Photos larger than 2048px or not PNG/JPEG/WebP are re-encoded as JPEG first, so a HEIC arrives as something the model can see. Drafts cannot hold files, so the New tab's Save refuses while any are attached |
 
 `StatusStore` (quota, history, colours) and `WorkspaceStore` (scheduled messages,
 snippets, schedules) hang off `BridgeRepository`'s `events`, `resyncs` and `pollRounds`
@@ -441,7 +442,6 @@ work:
 - editing Claude Code's settings and `CLAUDE.md`.
 
 Also out, by choice:
-- image rendering and attachments;
 - slash-command completion on the New tab, which would use the `?cwd=` form;
 - one-time (`at`) schedules and the pull-request gate's options in the schedule editor;
 - the live board as a queue, and the task board's other columns, for the reason given

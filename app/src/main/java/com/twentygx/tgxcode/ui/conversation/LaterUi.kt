@@ -230,12 +230,15 @@ fun LaterSheet(
                             else -> MaterialTheme.colorScheme.primary
                         },
                     )
-                    Text(
-                        m.text.ifBlank { "(attachments only)" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (m.text.isNotBlank() || m.attachments.isEmpty()) {
+                        Text(
+                            m.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    AttachmentNames(m.attachments)
                     m.error?.let { Text(it, style = TgxType.mono12, color = tgx.red) }
                     if (m.isPending) {
                         Row {

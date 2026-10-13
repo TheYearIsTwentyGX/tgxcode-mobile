@@ -15,6 +15,8 @@ data class QueuedMessage(
      * can lose the race and answer `409`.
      */
     val handed: Boolean = false,
+    /** Metadata for the row only — the queue holds the files by path. */
+    val attachments: List<AttachmentRef> = emptyList(),
 )
 
 /**

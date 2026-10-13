@@ -131,6 +131,8 @@ data class LaterMessage(
     val late: Boolean = false,
     val sentAt: Long? = null,
     val error: String? = null,
+    /** Paths only; the files are read off disk when it is delivered. */
+    val attachments: List<AttachmentRef> = emptyList(),
 ) {
     val isPending: Boolean get() = state == "pending"
 }
@@ -160,6 +162,8 @@ data class LaterCreate(
     val at: Long,
     val model: String? = null,
     val effort: String? = null,
+    /** Uploaded to the session first. [text] may be empty when there is one. */
+    val attachments: List<AttachmentRef>? = null,
 )
 
 /** A genuine partial: only what is sent changes. */
