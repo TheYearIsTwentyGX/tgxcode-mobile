@@ -14,7 +14,15 @@ import okhttp3.sse.EventSources
 sealed interface SseSignal {
     data object Open : SseSignal
     data class Message(val event: StreamEvent) : SseSignal
-    data class Closed(val cause: Throwable?, val httpStatus: Int?) : SseSignal
+    /**
+     * @param accessDenied the response was Cloudflare Access refusing the stream, not
+     *   the bridge. See [AccessChallenge].
+     */
+    data class Closed(
+        val cause: Throwable?,
+        val httpStatus: Int?,
+        val accessDenied: Boolean = false,
+    ) : SseSignal
 }
 
 /**
@@ -98,7 +106,11 @@ class BridgeSse(
                 t: Throwable?,
                 response: Response?,
             ) {
-                trySend(SseSignal.Closed(t, response?.code))
+                // A redirect to the Access login, or the login page itself served
+                // as 200 `text/html` — which okhttp-sse rejects as the wrong content
+                // type — both land here with the response attached.
+                val denied = response?.let(AccessChallenge::isChallenge) == true
+                trySend(SseSignal.Closed(t, response?.code, denied))
                 close()
             }
         }

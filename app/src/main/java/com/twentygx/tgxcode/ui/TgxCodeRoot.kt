@@ -61,6 +61,7 @@ import com.twentygx.tgxcode.ui.sessions.PrSheet
 import com.twentygx.tgxcode.ui.sessions.SessionsScreen
 import com.twentygx.tgxcode.ui.tasks.TaskActions
 import com.twentygx.tgxcode.ui.tasks.TasksScreen
+import com.twentygx.tgxcode.ui.settings.AccessDeniedScreen
 import com.twentygx.tgxcode.ui.settings.NotPairedScreen
 import com.twentygx.tgxcode.ui.settings.SettingsScreen
 import com.twentygx.tgxcode.ui.theme.Metrics
@@ -302,6 +303,10 @@ fun TgxCodeRoot(
                 NotPairedScreen(onOpenSettings = { nav.navigate(Settings) })
                 return@Box
             }
+            if (connection == ConnState.AccessDenied && !onSettings) {
+                AccessDeniedScreen(onOpenSettings = { nav.navigate(Settings) })
+                return@Box
+            }
 
             NavHost(navController = nav, startDestination = Sessions) {
                 composable<Sessions> {
@@ -400,6 +405,8 @@ fun TgxCodeRoot(
                         onPasteChanged = vm::onPaste,
                         onOriginChanged = vm::onOrigin,
                         onTokenChanged = vm::onToken,
+                        onAccessIdChanged = vm::onAccessId,
+                        onAccessSecretChanged = vm::onAccessSecret,
                         onTest = vm::test,
                         onSave = vm::save,
                         onForget = vm::forget,

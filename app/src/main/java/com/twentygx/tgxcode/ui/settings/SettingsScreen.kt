@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -25,6 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.twentygx.tgxcode.ui.common.EmptyState
 import com.twentygx.tgxcode.ui.theme.Metrics
@@ -47,6 +51,8 @@ fun SettingsScreen(
     onPasteChanged: (String) -> Unit,
     onOriginChanged: (String) -> Unit,
     onTokenChanged: (String) -> Unit,
+    onAccessIdChanged: (String) -> Unit,
+    onAccessSecretChanged: (String) -> Unit,
     onTest: () -> Unit,
     onSave: () -> Unit,
     onForget: () -> Unit,
@@ -100,6 +106,65 @@ fun SettingsScreen(
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
         )
+
+        // Its own section, below the pairing fields and apart from them, because it is
+        // a different credential for a different gate: the pairing link proves who we
+        // are to the bridge, and these prove it to Cloudflare in front of it. The link
+        // never carries them, so pasting one must not look like it should have.
+        Text(
+            "Cloudflare Access (optional)",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Text(
+            "Only if this bridge sits behind Cloudflare Access. The pairing link does " +
+                "not include these — copy them from Zero Trust → Access controls → " +
+                "Service credentials → Service Tokens. Leave both empty to turn this off.",
+            style = MaterialTheme.typography.bodySmall,
+            color = tgx.textMuted,
+        )
+
+        Text("Access client ID", style = MaterialTheme.typography.labelMedium, color = tgx.textMuted)
+        OutlinedTextField(
+            value = state.accessId,
+            onValueChange = onAccessIdChanged,
+            modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.FieldHeight),
+            singleLine = true,
+            placeholder = { Text("….access") },
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+        )
+
+        Text("Access client secret", style = MaterialTheme.typography.labelMedium, color = tgx.textMuted)
+        var showSecret by remember { mutableStateOf(false) }
+        OutlinedTextField(
+            value = state.accessSecret,
+            onValueChange = onAccessSecretChanged,
+            modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.FieldHeight),
+            singleLine = true,
+            visualTransformation = if (showSecret) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                autoCorrectEnabled = false,
+            ),
+            trailingIcon = {
+                TextButton(onClick = { showSecret = !showSecret }) {
+                    Text(if (showSecret) "Hide" else "Show")
+                }
+            },
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+        )
+
+        if (state.accessHalfSet) {
+            Text(
+                "Both the client ID and the secret are needed. With only one, neither is sent.",
+                style = MaterialTheme.typography.bodySmall,
+                color = tgx.yellow,
+            )
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
@@ -163,12 +228,56 @@ data class SettingsUiState(
     val paste: String = "",
     val origin: String = "",
     val token: String = "",
+    val accessId: String = "",
+    val accessSecret: String = "",
     val note: String? = null,
     val testing: Boolean = false,
     val probe: ProbeResult? = null,
     val stayConnected: Boolean = false,
 ) {
-    val canSave: Boolean get() = origin.isNotBlank() && token.isNotBlank()
+    /** One of the two Access fields without the other — never saved, never sent. */
+    val accessHalfSet: Boolean get() = accessId.isBlank() != accessSecret.isBlank()
+
+    val canSave: Boolean get() = origin.isNotBlank() && token.isNotBlank() && !accessHalfSet
+
+    /** Never the token or the secret, should this ever end up in a log or a crash report. */
+    override fun toString(): String =
+        "SettingsUiState(origin=$origin, accessId=$accessId, testing=$testing, probe=$probe)"
+}
+
+/**
+ * Shown when Cloudflare Access, in front of the bridge, refuses us.
+ *
+ * Deliberately not [NotPairedScreen]. Strict Access answers 401 just as the bridge
+ * does for a missing token, and "pair this device" would send someone to fetch a new
+ * pairing link that changes nothing. Nor is it "offline": the network is fine and
+ * the tunnel is up — the edge is refusing the service token.
+ */
+@Composable
+fun AccessDeniedScreen(onOpenSettings: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize()) {
+        EmptyState(
+            headline = "Cloudflare Access refused this request",
+            detail = "The bridge sits behind Cloudflare Access, and it did not accept " +
+                "this device's service token — so nothing reaches the bridge, and " +
+                "permission asks are auto-denied while this lasts.\n\nCheck the Access " +
+                "client ID and secret in Settings, and that the token is included in " +
+                "the application's Service Auth policy.",
+            modifier = Modifier.weight(1f),
+        )
+        Button(
+            onClick = onOpenSettings,
+            shape = Pill,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = tgx.blueDeep,
+                contentColor = Color.White,
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Metrics.ScreenPadding)
+                .heightIn(min = Metrics.PrimaryButtonHeight),
+        ) { Text("Check the service token") }
+    }
 }
 
 /**

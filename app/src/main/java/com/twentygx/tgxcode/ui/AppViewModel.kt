@@ -10,9 +10,11 @@ import com.twentygx.tgxcode.data.model.DraftBody
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.data.model.SuggestedTask
+import com.twentygx.tgxcode.data.net.BridgeConfig
 import com.twentygx.tgxcode.data.net.PairingInput
 import com.twentygx.tgxcode.data.repo.BridgeRepository
 import com.twentygx.tgxcode.data.repo.ConnState
+import com.twentygx.tgxcode.data.repo.isRefused
 import com.twentygx.tgxcode.data.settings.SettingsStore
 import com.twentygx.tgxcode.di.AppContainer
 import com.twentygx.tgxcode.service.BridgeService
@@ -119,6 +121,8 @@ class AppViewModel(
                     _settingsUi.value = ui.copy(
                         origin = ui.origin.ifBlank { config.origin },
                         token = ui.token.ifBlank { config.token },
+                        accessId = ui.accessId.ifBlank { config.accessId },
+                        accessSecret = ui.accessSecret.ifBlank { config.accessSecret },
                     )
                 }
             }
@@ -243,6 +247,8 @@ class AppViewModel(
 
     fun onOrigin(text: String) { _settingsUi.value = _settingsUi.value.copy(origin = text) }
     fun onToken(text: String) { _settingsUi.value = _settingsUi.value.copy(token = text) }
+    fun onAccessId(text: String) { _settingsUi.value = _settingsUi.value.copy(accessId = text) }
+    fun onAccessSecret(text: String) { _settingsUi.value = _settingsUi.value.copy(accessSecret = text) }
 
     /**
      * Persist the choice *and* act on it. Kept separate from the switch's own
@@ -261,7 +267,7 @@ class AppViewModel(
      */
     fun test() = viewModelScope.launch {
         val ui = _settingsUi.value
-        val config = PairingInput.build(ui.origin, ui.token)
+        val config = ui.toConfig()
         if (config == null) {
             _settingsUi.value = ui.copy(probe = ProbeResult("That is not a usable address.", false))
             return@launch
@@ -275,7 +281,7 @@ class AppViewModel(
         // probing immediately asks the old config — which on a first pairing is no
         // config at all, and reports "could not reach the bridge" about a bridge
         // that is perfectly reachable.
-        if (!awaitConfig(config.origin)) {
+        if (!awaitConfig(config)) {
             _settingsUi.value = _settingsUi.value.copy(
                 testing = false,
                 probe = ProbeResult("Could not store that address.", false),
@@ -290,9 +296,18 @@ class AppViewModel(
         repo.onOriginChanged()
         val state = repo.probePairing()
         syncLease()
+        // The service may still hold a lease on a stream loop that a refusal ended,
+        // so dropping ours is not enough to reopen it.
+        repo.reconnect()
         val health = repo.health.value
         val text = when (state) {
             ConnState.NotPaired -> "Reached the bridge, but it refused the token."
+            // /api/health sits behind Access too, so health is null here and the
+            // generic "could not reach" would be the wrong diagnosis.
+            ConnState.AccessDenied ->
+                "Cloudflare Access refused the request. Check the Access client ID " +
+                    "and secret below, and that the service token is in the " +
+                    "application's Service Auth policy."
             else -> if (health != null) {
                 "Connected to ${health.host ?: "the bridge"} " +
                     "(v${health.version ?: "?"}, ${health.sessions} sessions)" +
@@ -303,18 +318,19 @@ class AppViewModel(
         }
         _settingsUi.value = _settingsUi.value.copy(
             testing = false,
-            probe = ProbeResult(text, state != ConnState.NotPaired && health != null),
+            probe = ProbeResult(text, !state.isRefused && health != null),
         )
     }
 
     fun save() = viewModelScope.launch {
         val ui = _settingsUi.value
-        PairingInput.build(ui.origin, ui.token)?.let {
+        ui.toConfig()?.let {
             container.settings.save(it)
-            awaitConfig(it.origin)
+            awaitConfig(it)
             repo.onOriginChanged()
             if (lease == null) lease = repo.acquire()
             repo.probePairing()
+            repo.reconnect()
         }
     }
 
@@ -322,10 +338,18 @@ class AppViewModel(
      * Waits for a DataStore write to reach the in-memory config the network layer
      * reads. Returns false if it never arrives, rather than hanging the UI.
      */
-    private suspend fun awaitConfig(origin: String): Boolean =
+    private suspend fun awaitConfig(saved: BridgeConfig): Boolean =
         withTimeoutOrNull(3_000) {
-            container.config.first { it?.origin == origin }
+            // Every field, not just the origin: changing only the service token keeps
+            // the origin, and probing before the new secret surfaces would test the old.
+            container.config.first {
+                it?.origin == saved.origin && it.token == saved.token &&
+                    it.accessId == saved.accessId && it.accessSecret == saved.accessSecret
+            }
         } != null
+
+    private fun SettingsUiState.toConfig(): BridgeConfig? =
+        if (accessHalfSet) null else PairingInput.build(origin, token, accessId, accessSecret)
 
     fun forget() = viewModelScope.launch {
         onStop()

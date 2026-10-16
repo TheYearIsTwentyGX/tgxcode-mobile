@@ -29,12 +29,20 @@ class SettingsStore(private val context: Context) {
         /** Ciphertext, never the raw token. See [TokenCipher]. */
         val TOKEN = stringPreferencesKey("token_enc")
         val BACKGROUND = booleanPreferencesKey("stay_connected")
+        /** A Cloudflare Access client ID. An identifier, not a secret, so stored plain. */
+        val ACCESS_ID = stringPreferencesKey("access_id")
+        /** Ciphertext, through the same [TokenCipher] as the bearer token. */
+        val ACCESS_SECRET = stringPreferencesKey("access_secret_enc")
     }
 
     val config: Flow<BridgeConfig?> = context.dataStore.data.map { prefs ->
         val origin = prefs[Keys.ORIGIN] ?: return@map null
         val token = prefs[Keys.TOKEN]?.let(TokenCipher::decrypt) ?: return@map null
-        PairingInput.build(origin, token)
+        // An unreadable secret (a restored backup, a reset key) means Access is off
+        // rather than the whole config vanishing: the bridge token may still be fine,
+        // and the Access-refused screen says exactly what to re-enter.
+        val accessSecret = prefs[Keys.ACCESS_SECRET]?.let(TokenCipher::decrypt).orEmpty()
+        PairingInput.build(origin, token, prefs[Keys.ACCESS_ID].orEmpty(), accessSecret)
     }
 
     val origin: Flow<String?> = context.dataStore.data.map { it[Keys.ORIGIN] }
@@ -50,6 +58,12 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[Keys.ORIGIN] = config.origin
             prefs[Keys.TOKEN] = TokenCipher.encrypt(config.token)
+            // Saved with the origin, never on their own, so one host's Access token
+            // cannot end up attached to another host.
+            if (config.accessId.isBlank()) prefs.remove(Keys.ACCESS_ID)
+            else prefs[Keys.ACCESS_ID] = config.accessId
+            if (config.accessSecret.isBlank()) prefs.remove(Keys.ACCESS_SECRET)
+            else prefs[Keys.ACCESS_SECRET] = TokenCipher.encrypt(config.accessSecret)
         }
     }
 
@@ -61,6 +75,8 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs.remove(Keys.ORIGIN)
             prefs.remove(Keys.TOKEN)
+            prefs.remove(Keys.ACCESS_ID)
+            prefs.remove(Keys.ACCESS_SECRET)
         }
     }
 }

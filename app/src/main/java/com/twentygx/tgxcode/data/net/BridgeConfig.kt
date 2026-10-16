@@ -14,7 +14,26 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 data class BridgeConfig(
     val baseUrl: HttpUrl,
     val token: String,
+    /**
+     * A Cloudflare Access service token, for a bridge behind Access. Optional, and
+     * separate from [token]: Access checks these at Cloudflare's edge, the bridge
+     * never sees them, and its own bearer token is still required behind it.
+     */
+    val accessId: String = "",
+    val accessSecret: String = "",
 ) {
+    /**
+     * Both halves or nothing. Access rejects a half-set pair exactly as it rejects no
+     * pair, so sending one would only make the failure harder to read.
+     */
+    val access: Pair<String, String>?
+        get() = if (accessId.isNotBlank() && accessSecret.isNotBlank()) accessId to accessSecret else null
+
+    /** Masks both secrets, so a config that ends up in a log line leaks neither. */
+    override fun toString(): String =
+        "BridgeConfig(origin=$origin, token=***, accessId=${accessId.ifBlank { "-" }}, " +
+            "accessSecret=${if (accessSecret.isBlank()) "-" else "***"})"
+
     fun url(path: String, vararg query: Pair<String, String?>): HttpUrl =
         baseUrl.newBuilder()
             .addPathSegments(path.trimStart('/'))
@@ -91,10 +110,19 @@ object PairingInput {
         return Parsed(origin = origin, token = token, note = note)
     }
 
-    fun build(origin: String, token: String): BridgeConfig? {
+    /**
+     * The Access fields never come from a pairing link — the desktop does not know
+     * them — so they are passed separately and default to off.
+     */
+    fun build(
+        origin: String,
+        token: String,
+        accessId: String = "",
+        accessSecret: String = "",
+    ): BridgeConfig? {
         val url = origin.trim().removeSuffix("/").toHttpUrlOrNull() ?: return null
         val clean = token.trim()
         if (clean.isEmpty()) return null
-        return BridgeConfig(url, clean)
+        return BridgeConfig(url, clean, accessId.trim(), accessSecret.trim())
     }
 }

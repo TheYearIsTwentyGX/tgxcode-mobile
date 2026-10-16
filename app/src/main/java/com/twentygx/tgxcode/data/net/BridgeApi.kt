@@ -296,6 +296,24 @@ class BridgeApi(
         }
         try {
             client.newCall(build(config)).execute().use { response ->
+                // Before the status check, because one of the shapes is a 200 login
+                // page — and before reading the body, which is Cloudflare's, not ours.
+                if (AccessChallenge.isChallenge(response)) {
+                    Tgx.w(
+                        "${response.request.method} ${response.request.url.encodedPath} -> " +
+                            "${response.code}: Cloudflare Access refused it" +
+                            (AccessChallenge.redirectHost(response)?.let { " (redirect to $it)" } ?: ""),
+                    )
+                    return@withContext ApiResult.AccessDenied(response.code)
+                }
+                if (AccessChallenge.isTunnelDown(response)) {
+                    Tgx.w("${response.request.method} ${response.request.url.encodedPath} -> ${response.code}: tunnel has no bridge behind it")
+                    return@withContext ApiResult.Http(
+                        response.code,
+                        "Cloudflare could not reach the bridge (HTTP ${response.code}) — " +
+                            "is the bridge machine on and cloudflared running?",
+                    )
+                }
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     Tgx.w("${response.request.method} ${response.request.url.encodedPath} -> ${response.code}")
