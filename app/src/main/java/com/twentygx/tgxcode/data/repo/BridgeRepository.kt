@@ -3,6 +3,7 @@ package com.twentygx.tgxcode.data.repo
 import com.twentygx.tgxcode.core.ApiResult
 import com.twentygx.tgxcode.core.Tgx
 import com.twentygx.tgxcode.core.getOrNull
+import com.twentygx.tgxcode.core.isAccessDenied
 import com.twentygx.tgxcode.core.isUnauthorized
 import com.twentygx.tgxcode.core.message
 import com.twentygx.tgxcode.data.model.AttachmentRef
@@ -105,8 +106,17 @@ internal fun sendBody(
  * because this network will not carry a live stream. Held apart from [Live] because a
  * two-second lag looks like a bug unless the UI says otherwise, and apart from
  * [Offline] because asks are still being answered.
+ *
+ * [AccessDenied] is Cloudflare Access refusing us before the bridge ever saw the
+ * request. Like [NotPaired] it is terminal — retrying meets the same edge — and it is
+ * kept apart from it because the fix is different: the service token, not the
+ * pairing link.
  */
-enum class ConnState { Offline, Connecting, Live, Polling, NotPaired, Unconfigured }
+enum class ConnState { Offline, Connecting, Live, Polling, NotPaired, AccessDenied, Unconfigured }
+
+/** The two states in which nothing will work until the user changes a setting. */
+val ConnState.isRefused: Boolean
+    get() = this == ConnState.NotPaired || this == ConnState.AccessDenied
 
 /** Something worth a toast. */
 data class UserMessage(val text: String, val isError: Boolean = false)
@@ -418,7 +428,8 @@ class BridgeRepository(
             lock.withLock {
                 leases++
                 Tgx.d("lease acquired (now $leases)")
-                if (streamJob == null) startStream()
+                // A loop that ended itself on a refusal is finished, not running.
+                if (streamJob?.isActive != true) startStream()
             }
         }
         return AutoCloseable {
@@ -456,6 +467,26 @@ class BridgeRepository(
         buffered = false
     }
 
+    /**
+     * Drop the stream and open a fresh one, if anything holds a lease.
+     *
+     * For after the settings change. A refusal ends the stream loop for good — that is
+     * the point of it — so a corrected token or service token needs something to start
+     * it again, and the service's lease means the lease count may never reach zero to
+     * do it the ordinary way.
+     */
+    fun reconnect() {
+        scope.launch {
+            lock.withLock {
+                streamJob?.cancel()
+                streamJob = null
+                stopPolling()
+                clientId = null
+                if (leases > 0 && !_connection.value.isRefused) startStream()
+            }
+        }
+    }
+
     // ------------------------------------------------------------- the stream
 
     private fun startStream() {
@@ -466,7 +497,7 @@ class BridgeRepository(
                 // bridge refuses is not a reason to keep reopening anything — and
                 // reopening would call [startPolling] again, resurrecting a poll that
                 // had already stopped itself for exactly this reason.
-                if (_connection.value == ConnState.NotPaired) return@launch
+                if (_connection.value.isRefused) return@launch
                 val held = buffered
                 if (held) {
                     // The socket is opened for the bridge's benefit, not ours. Get the
@@ -491,6 +522,16 @@ class BridgeRepository(
                                 }
                                 is SseSignal.Closed -> {
                                     Tgx.w("stream closed: http=${signal.httpStatus}", signal.cause)
+                                    // Before the 401 check: strict Access answers 401
+                                    // too, and that one is not about pairing. Terminal
+                                    // like NotPaired, so the app cannot sit on a
+                                    // yellow dot retrying while the bridge has no
+                                    // viewer and auto-denies every ask.
+                                    if (signal.accessDenied) {
+                                        Tgx.w("stream refused by Cloudflare Access")
+                                        _connection.value = ConnState.AccessDenied
+                                        return@collect
+                                    }
                                     if (signal.httpStatus == 401) {
                                         _connection.value = ConnState.NotPaired
                                         return@collect
@@ -535,7 +576,7 @@ class BridgeRepository(
                     watchdog?.cancel()
                 }
 
-                if (_connection.value == ConnState.NotPaired) return@launch
+                if (_connection.value.isRefused) return@launch
 
                 // A clean run that got as far as `hello` starts its backoff over —
                 // an hour-long connection dropping once should reconnect instantly,
@@ -583,7 +624,7 @@ class BridgeRepository(
     private fun startPolling() {
         // Belt and braces with the check in [startStream]: polling a bridge that has
         // refused this token only discovers the same 401 every couple of seconds.
-        if (_connection.value == ConnState.NotPaired) return
+        if (_connection.value.isRefused) return
         if (pollJob?.isActive == true) {
             _connection.value = ConnState.Polling
             return
@@ -599,7 +640,7 @@ class BridgeRepository(
                 // the bridge refuses will keep being refused, and polling it every two
                 // and a half seconds forever is the version of this bug that costs
                 // battery instead of just being wrong.
-                if (_connection.value == ConnState.NotPaired) return@launch
+                if (_connection.value.isRefused) return@launch
                 _pollRounds.tryEmit(thisRound)
                 delay(pollMillis)
             }
@@ -626,7 +667,7 @@ class BridgeRepository(
         if (round % BOARD_EVERY == 0) {
             when (val result = api.overview()) {
                 is ApiResult.Ok -> publishBoard(result.value)
-                else -> if (result.isUnauthorized) return setPaired(false)
+                else -> if (result.refusesUs) return setAuth(result)
             }
         }
 
@@ -657,7 +698,7 @@ class BridgeRepository(
         // already fully in hand.
         when (val meta = api.session(open.sessionId, tail = LIVENESS_TAIL)) {
             is ApiResult.Ok -> applyPolledRunner(open.sessionId, meta.value.runner)
-            else -> if (meta.isUnauthorized) return setPaired(false)
+            else -> if (meta.refusesUs) return setAuth(meta)
         }
 
         // And whatever was appended since we last looked.
@@ -670,7 +711,7 @@ class BridgeRepository(
                         _conversation.value = it.applyEvents(delta.value.events, delta.value.offset)
                     }
                 }
-            else -> if (delta.isUnauthorized) return setPaired(false)
+            else -> if (delta.refusesUs) return setAuth(delta)
         }
 
         // `task-list` rides the stream, which is not arriving; this is the poll the
@@ -702,7 +743,7 @@ class BridgeRepository(
      * again on success is what heals the state if anything else ever does.
      */
     private fun stillPolling() {
-        if (_connection.value != ConnState.NotPaired) _connection.value = ConnState.Polling
+        if (!_connection.value.isRefused) _connection.value = ConnState.Polling
     }
 
     /**
@@ -1170,7 +1211,7 @@ class BridgeRepository(
     private fun setPaired(paired: Boolean) {
         if (!paired) {
             _connection.value = ConnState.NotPaired
-        } else if (_connection.value == ConnState.NotPaired ||
+        } else if (_connection.value.isRefused ||
             _connection.value == ConnState.Unconfigured
         ) {
             _connection.value = when {
@@ -1187,9 +1228,27 @@ class BridgeRepository(
                 _sessions.value = result.value.sessions
                 setPaired(true)
             }
-            else -> if (result.isUnauthorized) setPaired(false)
+            else -> if (result.refusesUs) setAuth(result)
         }
     }
+
+    /**
+     * What a response says about whether we may talk to the bridge at all.
+     *
+     * Access is checked first: it is the outer gate, and a strict-mode Access 401
+     * would otherwise read as "not paired". Anything else — success, or a failure
+     * that is about something other than us — clears both, the same way [setPaired]
+     * always has.
+     */
+    private fun setAuth(result: ApiResult<*>) {
+        when {
+            result.isAccessDenied -> _connection.value = ConnState.AccessDenied
+            result.isUnauthorized -> setPaired(false)
+            else -> setPaired(true)
+        }
+    }
+
+    private val ApiResult<*>.refusesUs: Boolean get() = isUnauthorized || isAccessDenied
 
     fun setTaskFilter(status: String) {
         if (_taskFilter.value == status) return
@@ -1214,7 +1273,7 @@ class BridgeRepository(
                     return
                 }
             }
-            else -> if (result.isUnauthorized) setPaired(false)
+            else -> if (result.refusesUs) setAuth(result)
         }
         if (status != TaskStatus.OPEN) {
             api.suggestions(TaskStatus.OPEN).getOrNull()
@@ -1279,8 +1338,8 @@ class BridgeRepository(
     suspend fun probePairing(): ConnState {
         refreshHealth()
         val result = api.sessions(limit = 1)
-        setPaired(!result.isUnauthorized)
-        Tgx.d("probe: paired=${!result.isUnauthorized} conn=${_connection.value}")
+        setAuth(result)
+        Tgx.d("probe: paired=${!result.isUnauthorized} access=${!result.isAccessDenied} conn=${_connection.value}")
         return _connection.value
     }
 
@@ -1360,6 +1419,13 @@ class BridgeRepository(
                             )
                             return
                         }
+
+                    // Not worth retrying: the next try meets the same edge.
+                    is ApiResult.AccessDenied -> {
+                        setAuth(result)
+                        _messages.emit(UserMessage(result.message(), isError = true))
+                        return
+                    }
 
                     // A dropped connection mid-creation is worth one more try.
                     is ApiResult.Offline ->

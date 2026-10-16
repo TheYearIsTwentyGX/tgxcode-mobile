@@ -8,12 +8,24 @@ package com.twentygx.tgxcode.core
  * - **409** on answering an ask means somebody already answered it, on the desktop
  *   or in another window. `docs/api.md`: "an ordinary outcome, not an error to
  *   shout about."
+ *
+ * And one response is not the bridge's at all: [AccessDenied] is Cloudflare Access
+ * refusing the request before it reached the bridge. It gets its own case because
+ * its 401/403 would otherwise read as "not paired" — the wrong screen, and the wrong
+ * fix.
  */
 sealed interface ApiResult<out T> {
     data class Ok<T>(val value: T) : ApiResult<T>
     data class Http(val status: Int, val error: String?) : ApiResult<Nothing>
     data class Offline(val cause: Throwable) : ApiResult<Nothing>
+    data class AccessDenied(val status: Int) : ApiResult<Nothing>
 }
+
+const val ACCESS_DENIED_MESSAGE =
+    "Cloudflare Access refused this request — check the service token in Settings."
+
+val ApiResult<*>.isAccessDenied: Boolean
+    get() = this is ApiResult.AccessDenied
 
 val ApiResult<*>.isUnauthorized: Boolean
     get() = this is ApiResult.Http && status == 401
@@ -28,6 +40,7 @@ fun ApiResult<*>.message(): String = when (this) {
     is ApiResult.Ok -> ""
     is ApiResult.Http -> error?.takeIf { it.isNotBlank() } ?: "HTTP $status"
     is ApiResult.Offline -> friendlyNetworkMessage(cause)
+    is ApiResult.AccessDenied -> ACCESS_DENIED_MESSAGE
 }
 
 /**

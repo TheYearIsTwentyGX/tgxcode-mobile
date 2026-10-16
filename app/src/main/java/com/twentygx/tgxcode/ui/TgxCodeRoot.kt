@@ -57,6 +57,7 @@ import androidx.navigation.toRoute
 import com.twentygx.tgxcode.data.repo.ConnState
 import com.twentygx.tgxcode.data.repo.NavCommand
 import com.twentygx.tgxcode.data.repo.appliesIn
+import com.twentygx.tgxcode.data.repo.isRefused
 import com.twentygx.tgxcode.ui.common.ConnectionDot
 import com.twentygx.tgxcode.ui.common.DegradedBanner
 import com.twentygx.tgxcode.ui.common.RemoteBanner
@@ -75,6 +76,7 @@ import com.twentygx.tgxcode.ui.sessions.SessionSheetActions
 import com.twentygx.tgxcode.ui.sessions.SessionsScreen
 import com.twentygx.tgxcode.ui.tasks.TaskActions
 import com.twentygx.tgxcode.ui.tasks.TasksScreen
+import com.twentygx.tgxcode.ui.settings.AccessDeniedScreen
 import com.twentygx.tgxcode.ui.settings.NotPairedScreen
 import com.twentygx.tgxcode.ui.settings.SettingsScreen
 import com.twentygx.tgxcode.ui.schedules.SchedulesScreen
@@ -397,6 +399,10 @@ fun TgxCodeRoot(
                     NotPairedScreen(onOpenSettings = { nav.navigate(Settings) })
                     return@Box
                 }
+                if (connection == ConnState.AccessDenied && !onSettings) {
+                    AccessDeniedScreen(onOpenSettings = { nav.navigate(Settings) })
+                    return@Box
+                }
 
                 NavHost(navController = nav, startDestination = Sessions) {
                     composable<Sessions> {
@@ -610,11 +616,13 @@ fun TgxCodeRoot(
                             onPasteChanged = vm::onPaste,
                             onOriginChanged = vm::onOrigin,
                             onTokenChanged = vm::onToken,
+                            onAccessIdChanged = vm::onAccessId,
+                            onAccessSecretChanged = vm::onAccessSecret,
                             onTest = vm::test,
                             onSave = vm::save,
                             onForget = vm::forget,
                             onStayConnectedChanged = onStayConnected,
-                            onOpenSnippets = { nav.navigate(Snippets) }.takeIf { connection != ConnState.NotPaired && connection != ConnState.Unconfigured },
+                            onOpenSnippets = { nav.navigate(Snippets) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },
                         )
                     }
                 }

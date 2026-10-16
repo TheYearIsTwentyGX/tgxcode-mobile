@@ -143,7 +143,8 @@ class StatusStore(
                             else -> "The quota beacon is not set up on the desktop yet"
                         },
                     )
-                    is ApiResult.Offline -> repo.report("Could not refresh: ${result.message()}", isError = true)
+                    is ApiResult.Offline, is ApiResult.AccessDenied ->
+                        repo.report("Could not refresh: ${result.message()}", isError = true)
                 }
             } finally {
                 _refreshingQuota.value = false

@@ -101,6 +101,10 @@ class BridgeService : Service() {
                     "Not paired",
                     "This device has no token",
                 )
+                ConnState.AccessDenied -> AskNotifications.ServiceState(
+                    "Blocked by Cloudflare Access",
+                    "Check the service token in Settings — asks are being auto-denied",
+                )
                 else -> AskNotifications.ServiceState(
                     "Not connected",
                     "Asks will be auto-denied",

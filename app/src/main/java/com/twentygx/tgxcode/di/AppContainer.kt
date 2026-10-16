@@ -40,7 +40,10 @@ class AppContainer(context: Context) {
     val stayConnected: StateFlow<Boolean> =
         settings.stayConnected.stateIn(appScope, SharingStarted.Eagerly, false)
 
-    private val clients = BridgeClients(tokenProvider = { config.value?.token })
+    private val clients = BridgeClients(
+        tokenProvider = { config.value?.token },
+        accessProvider = { config.value?.access },
+    )
 
     val api = BridgeApi(clients, configProvider = { config.value })
 
