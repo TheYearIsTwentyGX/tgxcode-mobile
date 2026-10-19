@@ -58,6 +58,7 @@ class AppViewModel(
     val repo: BridgeRepository = container.repository
     val status = container.status
     val workspace = container.workspace
+    val orchestrators = container.orchestrators
 
     /** For the one-off reads the files sheet makes; nothing about them is held. */
     val api = container.api

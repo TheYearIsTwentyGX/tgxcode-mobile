@@ -129,6 +129,10 @@ data class SessionSummary(
      * August 2026, which silently kept only the newest. Capped at ten.
      */
     val prs: List<PrRef> = emptyList(),
+    /** Set on a session marked as an orchestrator: `{inbox, workers, paused}`. */
+    val orchestrator: OrchestratorBadge? = null,
+    /** Set on a session an orchestrator started. */
+    val worker: WorkerBadge? = null,
 ) {
     /** What the Sessions row shows before the dot: worktree beats project name. */
     val place: String? get() = worktree?.name ?: projectName

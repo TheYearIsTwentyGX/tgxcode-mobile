@@ -208,6 +208,14 @@ sealed interface StreamEvent {
     @Serializable
     data class SlashCommandsChanged(val cwd: String? = null, val at: Long? = null) : StreamEvent
 
+    /**
+     * The **whole** `GET /api/sessions/:id/orchestrator` payload for one orchestrator,
+     * debounced to the end of a burst. Ungated. `enabled: false` means the role was
+     * just turned off.
+     */
+    @Serializable
+    data class OrchestratorChanged(val payload: OrchestratorPayload) : StreamEvent
+
     /** The user-level settings, whole, after any change — in another window included. */
     @Serializable
     data class PrefsChanged(val prefs: Prefs) : StreamEvent

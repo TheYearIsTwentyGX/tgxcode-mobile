@@ -939,7 +939,7 @@ class BridgeRepository(
             is StreamEvent.NotificationsCleared,
             is StreamEvent.LaterChanged, is StreamEvent.SnippetsChanged,
             is StreamEvent.SchedulesChanged, is StreamEvent.SlashCommandsChanged,
-            is StreamEvent.PrefsChanged -> Unit
+            is StreamEvent.PrefsChanged, is StreamEvent.OrchestratorChanged -> Unit
         }
     }
 
@@ -1779,6 +1779,7 @@ class BridgeRepository(
         model: String? = null,
         effort: String? = null,
         attachments: List<AttachmentRef> = emptyList(),
+        orchestrator: Boolean = false,
     ): Result<String> {
         val body = CreateSessionRequest(
             cwd = cwd,
@@ -1788,6 +1789,7 @@ class BridgeRepository(
             model = model?.takeIf { it.isNotBlank() },
             effort = effort?.takeIf { it.isNotBlank() },
             attachments = attachments.takeIf { it.isNotEmpty() },
+            orchestrator = orchestrator.takeIf { it },
         )
         return when (val result = api.createSession(body)) {
             is ApiResult.Ok -> Result.success(result.value.sessionId)

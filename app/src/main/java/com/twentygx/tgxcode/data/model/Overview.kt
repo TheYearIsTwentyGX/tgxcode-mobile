@@ -44,7 +44,21 @@ data class BoardCard(
     val headlines: List<Headline> = emptyList(),
     val tasks: TaskProgress? = null,
     val devservers: List<DevServer> = emptyList(),
+    /**
+     * `you` or `orchestrator` — who an [ask] is waiting on. `orchestrator` only on a
+     * worker whose orchestrator is still handling its asks; it turns `you` once the ask
+     * is stuck. Answerable from the card either way: the first answer wins.
+     */
+    val askFor: String? = null,
+    /** On a worker card: the orchestrator whose card this is drawn inside. */
+    val orchestratorId: String? = null,
+    /** On an orchestrator's card: the workers it carries. */
+    val workers: BoardWorkers? = null,
+    val standing: Standing? = null,
 ) {
+    /** An ask its orchestrator is still carrying — answerable, but not yet yours. */
+    val askForOrchestrator: Boolean get() = ask != null && askFor == "orchestrator"
+
     val boardReason: BoardReason
         get() = when (reason) {
             "ask" -> BoardReason.Ask
@@ -66,11 +80,12 @@ data class BoardCard(
     val why: String
         get() {
             ask?.let {
-                return when (it.askKind) {
+                val what = when (it.askKind) {
                     AskKind.Plan -> "A plan to approve"
                     AskKind.Question -> "A question to answer"
                     else -> "Wants to run ${it.toolLabel}"
                 }
+                return if (askForOrchestrator) "$what — its orchestrator has it" else what
             }
             runner?.activity?.takeIf { it.isNotBlank() }?.let { return it }
             return when (boardReason) {

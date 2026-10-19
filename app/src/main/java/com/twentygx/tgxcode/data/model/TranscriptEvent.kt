@@ -318,6 +318,32 @@ data class HandoffEvent(
     val title: String? = null,
 ) : TranscriptEvent()
 
+/**
+ * The bridge waking an idle orchestrator about its inbox — nobody typed it. [counts]
+ * is per inbox kind; null on a nudge older than the field, when [summary] is the
+ * fallback.
+ */
+@Serializable
+@SerialName("orchestrator-inbox")
+data class OrchestratorInboxEvent(
+    override val id: String,
+    override val ts: String? = null,
+    val count: Int = 0,
+    val counts: Map<String, Int>? = null,
+    val summary: String? = null,
+) : TranscriptEvent()
+
+/** An instruction from the orchestrator this session is a worker for. */
+@Serializable
+@SerialName("orchestrator-message")
+data class OrchestratorMessageEvent(
+    override val id: String,
+    override val ts: String? = null,
+    val text: String? = null,
+    val from: String? = null,
+    val fromTitle: String? = null,
+) : TranscriptEvent()
+
 @Serializable
 @SerialName("compact")
 data class CompactEvent(
