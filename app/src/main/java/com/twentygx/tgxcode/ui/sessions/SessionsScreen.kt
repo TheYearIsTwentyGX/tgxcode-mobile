@@ -85,7 +85,16 @@ fun SessionsScreen(
     val needle = filter.trim().lowercase()
     val searching = needle.isNotEmpty()
     val archivedCount = sessions.count { it.archived }
+    // An orchestrator's workers are its business: listed on its own page, not loose
+    // among everything else — the rail's rule. A pinned or archived one stays a row of
+    // its own, as does one whose orchestrator is not in the list, and a search finds
+    // them all.
+    val hosts = sessions.asSequence().filter { it.orchestrator != null && !it.archived }.map { it.sessionId }.toSet()
     val visible = sessions.asSequence()
+        .filter { s ->
+            searching || s.pinned || s.archived ||
+                s.worker?.orchestratorId?.let { it in hosts } != true
+        }
         // Archived *instead of* the rest, not as well: the chip is a way to find one
         // you put away, and burying it under every live session defeats that.
         .filter { it.archived == showArchived }
@@ -204,8 +213,17 @@ private fun SessionRow(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val orch = session.orchestrator
     val meta = listOfNotNull(
         "stalled".takeIf { session.isStalled },
+        orch?.let {
+            when {
+                it.paused -> "orch paused"
+                it.inbox > 0 -> "orch · ${it.inbox} unread"
+                else -> "orch"
+            } + (if (it.workers > 0) " · ${it.workers} worker${if (it.workers == 1) "" else "s"}" else "")
+        },
+        "worker".takeIf { session.worker != null },
         "pinned".takeIf { session.pinned },
         session.place?.takeIf { it.isNotBlank() },
         ago(session.lastTs).takeIf { it.isNotBlank() },

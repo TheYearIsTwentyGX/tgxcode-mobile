@@ -466,9 +466,34 @@ they now appear here, and where to find each one:
 | Slash commands | type `/` | |
 | Project colours | row stripe, card dot, a rule under the conversation's top bar | read-only: `PUT /api/prefs` is refused to remote callers |
 | Attachments | the + beside the message box, and on the New tab; images and 📎 files in the transcript | Photo (the system photo picker) or File (the document picker), up to five a message; needs a bridge with [TGXCode#206](https://github.com/TheYearIsTwentyGX/TGXCode/pull/206), which lets a remote caller upload at a 10MB cap. Photos larger than 2048px or not PNG/JPEG/WebP are re-encoded as JPEG first, so a HEIC arrives as something the model can see. Drafts cannot hold files, so the New tab's Save refuses while any are attached |
+| Orchestrators | an orchestrator's conversation opens on **Overview** (beside a Conversation tab); "Start as an orchestrator" and "Send to orchestrator…" on the New tab and on each draft; ⋮ → Make it an orchestrator / Orchestrator settings | see *Orchestrators* below |
 
-`StatusStore` (quota, history, colours) and `WorkspaceStore` (scheduled messages,
-snippets, schedules) hang off `BridgeRepository`'s `events`, `resyncs` and `pollRounds`
+### Orchestrators
+
+`web/orchestrator-page.js` in one column: the goal and progress strip, usage meters
+against the cutoff, **Needs you** (a pause with Resume, the brief's decisions answered
+with their option chips or a free reply, workers stuck on an ask, failed workers),
+**Tasks from you** with Take back, the brief, the workers with their six-stage track,
+the merge order, and the inbox under Activity with Dismiss. Its rules —
+`needsYou`, `workerStage`, `mergeOrder`, `progress` — are ported from
+`web/orchestrator-model.js` into `ui/orchestrator/OrchestratorModel.kt` and pinned by
+`OrchestratorTest`.
+
+An answer to a decision is sent first, as `Re: <question>` in the orchestrator's own
+mode, and recorded second, so nothing reads as answered unless it is on its way.
+Settings save field by field as they change, with a `null` limit sent as `null`.
+
+Workers are folded under their orchestrator: off the Sessions list (a search still finds
+them), as rows inside its Needs-you card, and with a banner on their own conversation
+leading back. A worker's ask its orchestrator still holds is notified silently and said
+aloud once the board calls it stuck.
+
+Left out, because the bridge refuses them to a remote caller: the worker drawer's
+"So far" digest (`…/orchestrator/read`) and a task's worktree hint. Per-orchestrator
+defaults live in prefs, which a phone cannot write either.
+
+`StatusStore` (quota, history, colours), `WorkspaceStore` (scheduled messages,
+snippets, schedules) and `OrchestratorStore` (payloads, the orchestrator list) hang off `BridgeRepository`'s `events`, `resyncs` and `pollRounds`
 flows. So each feature owns its own state, and none of them adds a branch to the
 repository's stream handler.
 

@@ -1,6 +1,14 @@
 package com.twentygx.tgxcode.ui.needs
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +33,7 @@ import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.AskKind
 import com.twentygx.tgxcode.data.model.BoardCard
 import com.twentygx.tgxcode.data.model.BoardReason
+import com.twentygx.tgxcode.data.model.BoardWorkers
 import com.twentygx.tgxcode.data.model.Decision
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.ui.common.AskButton
@@ -59,18 +68,238 @@ fun LazyListScope.needsSection(
     val cards = board?.sessions.orEmpty()
     if (cards.isEmpty()) return
 
+    // Orchestrators carry their workers: the worker cards stay in `sessions`, each
+    // naming its orchestrator, and are lifted out here to be drawn inside that card —
+    // the web board's `nestWorkers`. One whose orchestrator is not on the board is an
+    // ordinary card.
+    val byId = cards.associateBy { it.sessionId }
+    val hosts = cards.filter { it.workers != null }.map { it.sessionId }.toSet()
+    val top = cards.filterNot { it.orchestratorId != null && it.orchestratorId in hosts }
+
     item(key = "needs-header") { SectionHeader("Needs you") }
-    items(cards, key = { "needs-${it.sessionId}" }) { card ->
-        BoardCardItem(
-            card = card,
-            busy = card.ask?.requestId in answering,
-            onOpen = { onOpen(card.sessionId) },
-            onAnswer = onAnswer,
-            modifier = Modifier.padding(
-                horizontal = Metrics.ScreenPadding,
-                vertical = 5.dp,
-            ),
+    items(top, key = { "needs-${it.sessionId}" }) { card ->
+        val padding = Modifier.padding(horizontal = Metrics.ScreenPadding, vertical = 5.dp)
+        val carried = card.workers
+        if (carried != null) {
+            OrchestratorBoardCard(
+                card = card,
+                carried = carried,
+                workers = carried.ids.mapNotNull { byId[it] },
+                answering = answering,
+                onOpen = onOpen,
+                onAnswer = onAnswer,
+                modifier = padding,
+            )
+        } else {
+            BoardCardItem(
+                card = card,
+                busy = card.ask?.requestId in answering,
+                onOpen = { onOpen(card.sessionId) },
+                onAnswer = onAnswer,
+                modifier = padding,
+            )
+        }
+    }
+}
+
+/** Five worker rows before "+N more"; one over is drawn rather than folded. */
+private const val WORKERS_SHOWN = 5
+
+/**
+ * An orchestrator and the workers it carries, as one card: its own line, then a row
+ * per active worker (asks that are yours first, as the bridge ordered them), the
+ * spawns queued behind `maxRunning`, and a fold for the quiet ones.
+ */
+@Composable
+private fun OrchestratorBoardCard(
+    card: BoardCard,
+    carried: BoardWorkers,
+    workers: List<BoardCard>,
+    answering: Set<String>,
+    onOpen: (String) -> Unit,
+    onAnswer: (Ask, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = tgx
+    val accent = when (card.boardReason) {
+        BoardReason.Ask -> colors.yellow
+        BoardReason.Error -> colors.red
+        BoardReason.Here -> colors.green
+        else -> Color.Transparent
+    }
+    var more by rememberSaveable(card.sessionId) { mutableStateOf(false) }
+    var quietOpen by rememberSaveable(card.sessionId) { mutableStateOf(false) }
+
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(if (card.boardReason == BoardReason.Ask) colors.s3 else colors.s2, RoundedCornerShape(Radius.Lg))
+            .drawBehind { drawRect(accent, Offset.Zero, Size(Metrics.ReasonBorder.toPx(), size.height)) }
+            .padding(Metrics.CardPadding),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                card.displayTitle,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (carried.paused) "orch · paused" else "orch",
+                style = TgxType.mono12,
+                color = if (carried.paused) colors.yellow else colors.textFaint,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+
+        // On the board only because of its workers: say what they are doing rather
+        // than borrowing their reason as though it were its own.
+        val line = if (!carried.own) {
+            val running = workers.count { it.runner?.state == "busy" || it.runner?.state == "starting" }
+            val asking = workers.count { it.ask != null }
+            val failed = workers.count { it.boardReason == BoardReason.Error }
+            (if (carried.paused) "Paused" else "Waiting on workers") + " · " + listOfNotNull(
+                "$running running",
+                "$asking asking".takeIf { asking > 0 },
+                "$failed failed".takeIf { failed > 0 },
+                "${carried.queued.size} queued".takeIf { carried.queued.isNotEmpty() },
+            ).joinToString(", ")
+        } else {
+            card.why
+        }
+        Text(line, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+
+        val shown = if (more || workers.size <= WORKERS_SHOWN + 1) workers else workers.take(WORKERS_SHOWN)
+        shown.forEach { w ->
+            WorkerBoardRow(w, busy = w.ask?.requestId in answering, onOpen = { onOpen(w.sessionId) }, onAnswer = onAnswer)
+        }
+        if (workers.size > WORKERS_SHOWN + 1) {
+            Text(
+                if (more) "Show fewer" else "+${workers.size - WORKERS_SHOWN} more",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { more = !more }.padding(vertical = 4.dp),
+            )
+        }
+        carried.queued.forEach { q ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).border(1.5.dp, colors.textFaint, CircleShape))
+                Text(
+                    (q.title ?: "untitled") + " — queued, starts when a slot frees",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 9.dp),
+                )
+            }
+        }
+        if (carried.quiet.isNotEmpty() || carried.idle + carried.finished > 0) {
+            Text(
+                (if (quietOpen) "▾ " else "▸ ") + listOfNotNull(
+                    "${carried.idle} idle".takeIf { carried.idle > 0 },
+                    "${carried.finished} finished".takeIf { carried.finished > 0 },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textMuted,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { quietOpen = !quietOpen }
+                    .padding(vertical = 6.dp),
+            )
+            if (quietOpen) {
+                carried.quiet.forEach { q ->
+                    Text(
+                        listOfNotNull(
+                            q.title ?: "untitled",
+                            if (q.state == "finished") "Finished" else "Idle",
+                            q.standing?.takeIf { it.isNotBlank() }?.let { com.twentygx.tgxcode.ui.orchestrator.clip(it, 60) },
+                            com.twentygx.tgxcode.core.ago(q.at).takeIf { it.isNotBlank() },
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpen(q.id) }
+                            .padding(vertical = 6.dp),
+                    )
+                }
+                val older = carried.idle + carried.finished - carried.quiet.size
+                if (older > 0) {
+                    Text("+$older older", style = MaterialTheme.typography.bodySmall, color = colors.textFaint)
+                }
+            }
+        }
+
+        AskButton(
+            "Open the orchestrator",
+            { onOpen(card.sessionId) },
+            kind = if (card.ask != null && card.workers?.own != false) AskButtonKind.Affirmative else AskButtonKind.Neutral,
         )
+    }
+}
+
+@Composable
+private fun WorkerBoardRow(
+    card: BoardCard,
+    busy: Boolean,
+    onOpen: () -> Unit,
+    onAnswer: (Ask, String) -> Unit,
+) {
+    val colors = tgx
+    val dot = when {
+        card.ask != null -> colors.yellow
+        card.boardReason == BoardReason.Error -> colors.red
+        card.runner?.state == "busy" || card.runner?.state == "starting" -> colors.green
+        else -> colors.textFaint
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.s1, RoundedCornerShape(Radius.Md))
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(7.dp).background(dot, CircleShape))
+            Text(
+                card.displayTitle,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 9.dp),
+            )
+        }
+        Text(card.why, style = MaterialTheme.typography.bodySmall, color = colors.textMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        val ask = card.ask
+        if (ask != null) {
+            if (card.askForOrchestrator) {
+                Text(
+                    "The orchestrator has it — you can answer first.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textFaint,
+                )
+            }
+            if (ask.askKind == AskKind.Tool) {
+                val stamped = ask.copy(sessionId = ask.sessionId ?: card.sessionId)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        AskButton("Allow", { onAnswer(stamped, Decision.ALLOW) }, kind = AskButtonKind.Affirmative, enabled = !busy)
+                    }
+                    Box(Modifier.weight(1f)) {
+                        AskButton("Always", { onAnswer(stamped, Decision.ALLOW_ALWAYS) }, enabled = !busy)
+                    }
+                    Box(Modifier.weight(1f)) {
+                        AskButton("Deny", { onAnswer(stamped, Decision.DENY) }, kind = AskButtonKind.Destructive, enabled = !busy)
+                    }
+                }
+            }
+        }
     }
 }
 

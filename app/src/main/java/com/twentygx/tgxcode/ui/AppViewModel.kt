@@ -23,6 +23,11 @@ import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.data.model.SuggestedTask
 import com.twentygx.tgxcode.data.model.UserEvent
+import com.twentygx.tgxcode.data.model.BriefDecision
+import com.twentygx.tgxcode.data.model.InboxItem
+import com.twentygx.tgxcode.data.model.OpenTask
+import com.twentygx.tgxcode.data.model.SettingsPatch
+import com.twentygx.tgxcode.data.model.TaskFields
 import com.twentygx.tgxcode.data.net.BridgeConfig
 import com.twentygx.tgxcode.data.net.PairingInput
 import com.twentygx.tgxcode.data.repo.BridgeRepository
@@ -634,6 +639,79 @@ class AppViewModel(
         _answering.value = _answering.value - ask.requestId
     }
 
+    // ----------------------------------------------------------- orchestrators
+
+    /**
+     * Answer one of an orchestrator's brief questions. Sent in the orchestrator's own
+     * mode — the one its composer would send with — so answering does not move it.
+     */
+    fun answerDecision(orchestratorId: String, decision: BriefDecision, answer: String) = viewModelScope.launch {
+        val mode = if (repo.conversation.value?.sessionId == orchestratorId) modeFor(orchestratorId)
+        else repo.sessions.value.firstOrNull { it.sessionId == orchestratorId }?.permissionMode ?: "auto"
+        orchestrators.answerDecision(orchestratorId, decision, answer, mode)
+    }
+
+    fun saveOrchestratorSettings(orchestratorId: String, patch: SettingsPatch) =
+        viewModelScope.launch { orchestrators.saveSettings(orchestratorId, patch) }
+
+    fun resumeOrchestrator(orchestratorId: String) = viewModelScope.launch { orchestrators.resume(orchestratorId) }
+
+    fun dismissInboxItem(orchestratorId: String, item: InboxItem) =
+        viewModelScope.launch { orchestrators.dismiss(orchestratorId, item.id) }
+
+    fun withdrawTask(orchestratorId: String, task: OpenTask) =
+        viewModelScope.launch { orchestrators.withdraw(orchestratorId, task.id) }
+
+    fun makeOrchestrator(sessionId: String) = viewModelScope.launch { orchestrators.enable(sessionId) }
+
+    fun stopOrchestrating(sessionId: String) = viewModelScope.launch { orchestrators.disable(sessionId) }
+
+    /**
+     * Hand a stored draft over. The bridge removes it once filed. One open in the form
+     * and changed since goes as the form, so what is handed over is what is on screen.
+     */
+    fun sendDraftToOrchestrator(orchestratorId: String, draft: Draft) = viewModelScope.launch {
+        val state = _newSession.value
+        if (state.editingDraftId == draft.id && state.differsFrom(draft)) {
+            sendFormToOrchestrator(orchestratorId).join()
+            return@launch
+        }
+        if (orchestrators.fileTask(orchestratorId, draftId = draft.id) &&
+            _newSession.value.editingDraftId == draft.id
+        ) {
+            clearDraftEdit()
+        }
+    }
+
+    /**
+     * Hand the Start form over as it stands. A form showing a saved draft sends both,
+     * which files what is on screen and consumes the draft — an edit sent unsaved.
+     */
+    fun sendFormToOrchestrator(orchestratorId: String) = viewModelScope.launch {
+        val state = _newSession.value
+        val invalid = state.validate()
+            ?: "A task cannot carry attachments. Start the session, or remove the files."
+                .takeIf { state.attachments.isNotEmpty() }
+        if (invalid != null) {
+            _newSession.value = state.copy(error = invalid)
+            return@launch
+        }
+        _newSession.value = state.copy(starting = true, error = null)
+        val filed = orchestrators.fileTask(
+            orchestratorId,
+            draftId = state.editingDraftId,
+            fields = TaskFields(
+                cwd = state.cwd.orEmpty(),
+                prompt = state.prompt.trim(),
+                permissionMode = state.mode,
+                test = state.test,
+                model = state.model.takeIf { it.isNotBlank() },
+                effort = state.effort.takeIf { it.isNotBlank() },
+            ),
+        )
+        _newSession.value = if (filed) state.blankKeepingSetup() else _newSession.value.copy(starting = false)
+    }
+
     // ---------------------------------------------------------------- settings
 
     fun onPaste(text: String) {
@@ -786,6 +864,18 @@ class AppViewModel(
     fun setNewPrompt(text: String) { _newSession.value = _newSession.value.copy(prompt = text) }
     fun setNewTest(on: Boolean) { _newSession.value = _newSession.value.copy(test = on) }
 
+    /**
+     * Ticking it moves a `plan` session to `auto`, as the desktop's dialog does: in plan
+     * mode every worker it starts would wait on your approval before doing anything.
+     */
+    fun setNewOrchestrator(on: Boolean) {
+        val state = _newSession.value
+        _newSession.value = state.copy(
+            orchestrator = on,
+            mode = if (on && state.mode == "plan") "auto" else state.mode,
+        )
+    }
+
     fun startSession(onStarted: (String) -> Unit) = viewModelScope.launch {
         val state = _newSession.value
         val invalid = state.validate()
@@ -821,6 +911,7 @@ class AppViewModel(
             model = state.model,
             effort = state.effort,
             attachments = files.readyRefs(),
+            orchestrator = state.orchestrator,
         )
             .onSuccess { id ->
                 _newSession.value = _newSession.value.copy(
@@ -828,6 +919,7 @@ class AppViewModel(
                     prompt = "",
                     attachments = emptyList(),
                     editingDraftId = null,
+                    orchestrator = false,
                 )
                 justCreated = id
                 onStarted(id)
@@ -1003,7 +1095,10 @@ class AppViewModel(
                     cwd = draft.cwd,
                     error = null,
                 )
-                repo.report(if (editing == null) "Saved as a draft" else "Draft updated")
+                repo.report(
+                    (if (editing == null) "Saved as a draft" else "Draft updated") +
+                        (if (state.orchestrator) " — a draft does not remember “Start as an orchestrator”" else ""),
+                )
             }
             .onFailure { error ->
                 _newSession.value = _newSession.value.copy(
@@ -1083,6 +1178,8 @@ data class NewSessionUiState(
     val effort: String = "",
     val prompt: String = "",
     val test: Boolean = false,
+    /** Start it as an orchestrator. Not sticky, and a draft cannot remember it. */
+    val orchestrator: Boolean = false,
     /** Held until Start, then uploaded to [cwd]. Drafts cannot carry them. */
     val attachments: List<StagedFile> = emptyList(),
     val starting: Boolean = false,
