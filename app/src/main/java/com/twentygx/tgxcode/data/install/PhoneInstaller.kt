@@ -213,6 +213,9 @@ class PhoneInstaller(
                         )
                         if (wrong != null) return fail(id, label, wrong)
                     }
+                    // Installed, cancelled or expired on the desk: nothing left to retry.
+                    is ApiResult.Http if download.status == 410 ->
+                        return fail(id, label, "The APK is no longer on the desktop (installed, cancelled or expired).")
                     else -> return fail(id, label, "Download failed: ${download.message()}")
                 }
             }

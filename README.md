@@ -267,7 +267,9 @@ permission granted.
 **Signature mismatch.** An APK signed with a different key from the installed copy
 cannot be installed over it. A debug build from another machine is the usual cause.
 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` is reported as *already installed with a different
-signing key — uninstall it on the phone first*. Nothing on this side can get around it.
+signature — uninstall it on the phone first*. Android's own text is added after it,
+because the desktop tool looks for `signature`, `incompatible` or `conflict` in the
+message. Nothing on this side can get around it.
 
 **Updating TGXCode itself** kills the process that committed the install, so
 `installing` is reported before the commit. Every claim is kept in DataStore. On the

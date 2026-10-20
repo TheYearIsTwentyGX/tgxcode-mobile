@@ -75,7 +75,7 @@ object PhoneInstallRules {
             // arrives as CONFLICT on most builds and INCOMPATIBLE on some, and either
             // way the only fix is the same.
             isSignatureMismatch(status, detail) -> failed(
-                "$app is already installed with a different signing key. " +
+                "$app is already installed with a different signature (signing key). " +
                     "Uninstall it on the phone first, then send it again.",
             )
             status == PackageInstaller.STATUS_FAILURE_ABORTED -> failed("Cancelled on the phone.")
