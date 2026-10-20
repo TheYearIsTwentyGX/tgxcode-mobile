@@ -939,7 +939,8 @@ class BridgeRepository(
             is StreamEvent.NotificationsCleared,
             is StreamEvent.LaterChanged, is StreamEvent.SnippetsChanged,
             is StreamEvent.SchedulesChanged, is StreamEvent.SlashCommandsChanged,
-            is StreamEvent.PrefsChanged, is StreamEvent.OrchestratorChanged -> Unit
+            is StreamEvent.PrefsChanged, is StreamEvent.OrchestratorChanged,
+            is StreamEvent.PhoneInstallChanged -> Unit
         }
     }
 

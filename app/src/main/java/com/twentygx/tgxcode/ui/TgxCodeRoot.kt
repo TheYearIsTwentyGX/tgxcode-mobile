@@ -728,6 +728,8 @@ fun TgxCodeRoot(
                             onSave = vm::save,
                             onForget = vm::forget,
                             onStayConnectedChanged = onStayConnected,
+                            onInstallAppsChanged = vm::setInstallApps,
+                            onGrantInstallPermission = vm::grantInstallPermission,
                             onOpenSnippets = { nav.navigate(Snippets) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },
                         )
                     }

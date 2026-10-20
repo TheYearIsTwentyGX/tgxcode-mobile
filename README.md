@@ -221,6 +221,64 @@ in one session share a notification id, so a reused intent would answer the
 *previous* `requestId`. Each action uses `requestCode = (requestId + decision).hashCode()`
 with `FLAG_UPDATE_CURRENT`.
 
+## Phone installs
+
+Agents on the desktop build APKs, and installing them over wireless debugging keeps
+failing because Wireless debugging switches itself off. The app already holds an
+authenticated connection to the bridge from any network, so the bridge keeps a
+**phone installs** queue and the app installs from it with `PackageInstaller`. Developer
+mode is not needed.
+
+How it goes, all in `data/install/PhoneInstaller.kt`:
+
+1. The bridge files a `pending` record and pushes it as `phone_install`. The app also
+   reads `GET /api/phone-installs` on every (re)connect, at start, and every 20s while
+   polling, because nothing is replayed to a client that was away.
+2. **Claim** with `POST …/status {state: "downloading"}`. A `409` means another phone has
+   it, so the app drops it. Claims are keyed on `X-TGXCode-Viewer`, a random id this
+   install makes once and keeps. It is sent on that route only, because on any other
+   route the header means "count this poller as a viewer".
+3. **Download** to the cache, hashing as it goes, then check the size, the sha256, and
+   the bridge's `X-SHA256` against the record. Any mismatch reports `failed`.
+4. Read the package name and version from the APK, report `installing`, and commit a
+   `PackageInstaller` session with `USER_ACTION_NOT_REQUIRED` (API 31+) and
+   `setRequestUpdateOwnership(true)` (API 34+).
+5. The session result comes back to `InstallResultReceiver` and is reported as
+   `installed`, `needs_action` or `failed`. A quiet notification on **Install results**
+   says how it ended.
+
+**One tap per app, once.** A silent install only works for an update to a package
+TGXCode is already the installer of record for, which includes TGXCode itself. The first
+install of anything else, and any app last installed by adb or the Play Store, comes back
+asking for confirmation. Background apps may not start activities, so that request
+becomes a **Tap to install …** notification on **Installs to confirm**. If the app is on
+screen the dialog opens straight away. After that one tap TGXCode owns the package, and
+later builds go on silently. Android also needs the app being updated to target a recent
+API level, and the minimum goes up with each Android release.
+
+**Install unknown apps.** Settings has a switch, **Install apps sent from the desktop**
+(on by default; when it is off, records are ignored), and a row showing whether TGXCode
+is allowed to install apps, with a button that opens the system screen. If an install
+arrives without that permission, the APK is downloaded and checked first. Then the
+record goes to `needs_action` with a message saying what to turn on, and a notification
+opens the setting. The install carries on by itself when the app next resumes with the
+permission granted.
+
+**Signature mismatch.** An APK signed with a different key from the installed copy
+cannot be installed over it. A debug build from another machine is the usual cause.
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE` is reported as *already installed with a different
+signing key — uninstall it on the phone first*. Nothing on this side can get around it.
+
+**Updating TGXCode itself** kills the process that committed the install, so
+`installing` is reported before the commit. Every claim is kept in DataStore. On the
+next start the app compares any claim still `installing` with the package's
+`lastUpdateTime` and `versionName`, then reports `installed`. A claim that is still
+`installing` after 30 minutes with no evidence is reported `failed`.
+
+Notifications need the notification permission, which the app asks for when *Stay
+connected in the background* is turned on. Without it, installs still happen, but an
+app that needs a tap waits silently.
+
 ## When the network will not carry a stream
 
 SSE is best-effort; polling is the guaranteed path. Some transports buffer server-sent

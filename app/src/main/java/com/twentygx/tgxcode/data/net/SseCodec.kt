@@ -9,6 +9,7 @@ import com.twentygx.tgxcode.data.model.NotificationRow
 import com.twentygx.tgxcode.data.model.Quota
 import com.twentygx.tgxcode.data.model.TaskList
 import com.twentygx.tgxcode.data.model.OrchestratorPayload
+import com.twentygx.tgxcode.data.model.PhoneInstall
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.data.model.Prefs
 import com.twentygx.tgxcode.data.model.PrsPayload
@@ -61,6 +62,9 @@ object SseCodec {
         "orchestrator" ->
             StreamEvent.OrchestratorChanged(AppJson.decodeFromString(serializer<OrchestratorPayload>(), data))
         "prefs" -> StreamEvent.PrefsChanged(AppJson.decodeFromString(serializer<Prefs>(), data))
+        // Underscored, unlike every other name here — the bridge's spelling, kept.
+        "phone_install" ->
+            StreamEvent.PhoneInstallChanged(AppJson.decodeFromString(serializer<PhoneInstall>(), data))
         "notification" ->
             StreamEvent.NotificationFiled(AppJson.decodeFromString(serializer<NotificationRow>(), data))
 

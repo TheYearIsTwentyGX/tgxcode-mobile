@@ -219,4 +219,8 @@ sealed interface StreamEvent {
     /** The user-level settings, whole, after any change — in another window included. */
     @Serializable
     data class PrefsChanged(val prefs: Prefs) : StreamEvent
+
+    /** A whole phone-install record, on create and on every report back. Ungated. */
+    @Serializable
+    data class PhoneInstallChanged(val install: PhoneInstall) : StreamEvent
 }

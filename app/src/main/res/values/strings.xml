@@ -10,4 +10,8 @@
     <string name="channel_connection_desc">The ongoing notice that TGXCode is holding a connection to the bridge.</string>
     <string name="channel_activity_name">Session activity</string>
     <string name="channel_activity_desc">Turn errors, warnings, and messages that failed to send.</string>
+    <string name="channel_installs_name">Installs to confirm</string>
+    <string name="channel_installs_desc">An app sent from the desktop is waiting for a tap, or for permission to install apps.</string>
+    <string name="channel_install_results_name">Install results</string>
+    <string name="channel_install_results_desc">An app sent from the desktop was installed, or could not be.</string>
 </resources>
