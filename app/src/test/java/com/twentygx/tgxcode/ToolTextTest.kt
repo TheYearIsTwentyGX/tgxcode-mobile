@@ -14,9 +14,9 @@ import org.junit.Test
 class ToolTextTest {
 
     @Test
-    fun `strips the mcp server prefix`() {
+    fun `draws an mcp tool by its friendly name`() {
         assertEquals(
-            "browser_navigate",
+            "Playwright: Browser Navigate",
             toolLabel("mcp__plugin_playwright_playwright__browser_navigate"),
         )
     }

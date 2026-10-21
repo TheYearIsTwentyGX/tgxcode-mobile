@@ -2,6 +2,7 @@ package com.twentygx.tgxcode.di
 
 import android.content.Context
 import com.twentygx.tgxcode.data.attach.AttachmentSource
+import com.twentygx.tgxcode.data.attach.ChatImageCache
 import com.twentygx.tgxcode.data.attach.Uploader
 import com.twentygx.tgxcode.data.install.PhoneInstaller
 import com.twentygx.tgxcode.data.net.BridgeApi
@@ -48,6 +49,9 @@ class AppContainer(context: Context) {
     )
 
     val api = BridgeApi(clients, configProvider = { config.value })
+
+    /** The Images sheet's pictures, kept on disk by content hash. */
+    val chatImages = ChatImageCache(api, java.io.File(appContext.cacheDir, "chat-images"))
 
     private val sse = BridgeSse(clients, configProvider = { config.value })
 
