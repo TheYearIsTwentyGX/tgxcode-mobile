@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
     // read during composition never will.
     private val pendingSessionId = mutableStateOf<String?>(null)
     private val pendingPairing = mutableStateOf<String?>(null)
+    private val pendingInstalls = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Not optional at targetSdk 36 — since 35 there is no opt-out, and without
@@ -40,6 +41,7 @@ class MainActivity : ComponentActivity() {
 
                 val sessionId by pendingSessionId
                 val pairing by pendingPairing
+                val installs by pendingInstalls
 
                 LaunchedEffect(Unit) {
                     vm.onStart()
@@ -59,7 +61,9 @@ class MainActivity : ComponentActivity() {
                     vm = vm,
                     deepLinkSessionId = sessionId,
                     pairingLink = pairing,
+                    openInstalls = installs,
                     onDeepLinkHandled = { pendingSessionId.value = null },
+                    onInstallsHandled = { pendingInstalls.value = false },
                     onPairingHandled = { pendingPairing.value = null },
                     onStayConnected = { wanted ->
                         if (!wanted) {
@@ -99,9 +103,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Three ways in: the launcher, a `tgxcode://session/<id>` deep link from a
-     * notification, and a pairing link either shared from the browser or opened as
-     * an App Link.
+     * Four ways in: the launcher, a `tgxcode://session/<id>` deep link from a
+     * notification, `tgxcode://installs` from an install notification, and a pairing
+     * link either shared from the browser or opened as an App Link.
      */
     private fun consume(intent: Intent?) {
         when {
@@ -112,6 +116,8 @@ class MainActivity : ComponentActivity() {
                 val data = intent.data ?: return
                 if (data.scheme == "tgxcode" && data.host == "session") {
                     pendingSessionId.value = data.lastPathSegment
+                } else if (data.scheme == "tgxcode" && data.host == "installs") {
+                    pendingInstalls.value = true
                 } else if (data.path?.startsWith("/pair") == true) {
                     pendingPairing.value = data.toString()
                 }

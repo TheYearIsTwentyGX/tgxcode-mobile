@@ -73,7 +73,7 @@ class PhoneInstallTest {
     // ---------------------------------------------------------------- catch-up
 
     @Test
-    fun `catch-up claims pending records oldest first and skips what is in hand`() {
+    fun `catch-up claims pending records oldest first and skips what is in hand or claimed elsewhere`() {
         val installs = listOf(
             record("newest", PhoneInstallState.PENDING, createdAt = 30),
             record("done", PhoneInstallState.INSTALLED, createdAt = 25),
@@ -82,13 +82,13 @@ class PhoneInstallTest {
             record("oldest", PhoneInstallState.PENDING, createdAt = 10),
             record("failed", PhoneInstallState.FAILED, createdAt = 5),
         )
-        val picked = PhoneInstallRules.toClaim(installs, inHand = setOf("busy"))
+        val picked = PhoneInstallRules.toPickUp(installs, ownClaims = emptySet(), inHand = setOf("busy"))
         assertEquals(listOf("oldest", "newest"), picked.map { it.id })
     }
 
     @Test
     fun `catch-up on an empty queue picks nothing`() {
-        assertTrue(PhoneInstallRules.toClaim(emptyList(), emptySet()).isEmpty())
+        assertTrue(PhoneInstallRules.toPickUp(emptyList(), emptySet(), emptySet()).isEmpty())
     }
 
     // ---------------------------------------------------------------- verification

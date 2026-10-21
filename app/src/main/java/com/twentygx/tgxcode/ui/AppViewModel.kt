@@ -775,6 +775,23 @@ class AppViewModel(
         container.phoneInstalls.setEnabled(on)
     }
 
+    /** The phone-installs queue, for the Installs screen. */
+    val phoneInstalls = container.phoneInstalls
+
+    private val _retryingInstalls = MutableStateFlow<Set<String>>(emptySet())
+    val retryingInstalls: StateFlow<Set<String>> = _retryingInstalls.asStateFlow()
+
+    fun refreshInstalls() = viewModelScope.launch { container.phoneInstalls.refresh() }
+
+    fun retryInstall(id: String) = viewModelScope.launch {
+        _retryingInstalls.value += id
+        try {
+            container.phoneInstalls.retry(id)?.let { repo.report(it, isError = true) }
+        } finally {
+            _retryingInstalls.value -= id
+        }
+    }
+
     /**
      * The per-app "Install unknown apps" screen. Coming back is a resume, which re-reads
      * the grant and carries on anything that was waiting for it.

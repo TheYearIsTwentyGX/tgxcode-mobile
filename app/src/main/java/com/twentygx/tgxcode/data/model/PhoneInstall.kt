@@ -26,7 +26,19 @@ data class PhoneInstall(
     val packageName: String? = null,
     val versionName: String? = null,
     val updatedAt: Long = 0,
+    /** How far the claiming phone's download has got, from its heartbeats. */
+    val progress: PhoneInstallProgress? = null,
+    /** The bridge's flag: `downloading` or `installing` with no word for 90s. */
+    val stalled: Boolean = false,
+    /** How many times a phone has claimed it. The bridge fails it after three. */
+    val attempts: Int = 0,
 )
+
+/** Bytes downloaded of [total]; [total] is 0 when the length is not known. */
+@Serializable
+data class PhoneInstallProgress(val bytes: Long, val total: Long = 0) {
+    val fraction: Float? get() = if (total > 0) (bytes.toFloat() / total).coerceIn(0f, 1f) else null
+}
 
 object PhoneInstallState {
     const val PENDING = "pending"
@@ -39,6 +51,9 @@ object PhoneInstallState {
 
     /** Nothing will happen to these again. `failed` is not one: a retry may follow. */
     val FINAL = setOf(INSTALLED, CANCELLED)
+
+    /** A phone is working on these, so the bridge expects to hear from it. */
+    val WORKING = setOf(DOWNLOADING, INSTALLING)
 }
 
 /** `GET /api/phone-installs` — newest first. */
@@ -52,4 +67,6 @@ data class PhoneInstallStatus(
     val message: String? = null,
     val packageName: String? = null,
     val versionName: String? = null,
+    /** With `downloading` only: the heartbeat that says the transfer is moving. */
+    val progress: PhoneInstallProgress? = null,
 )

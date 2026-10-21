@@ -62,6 +62,8 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     /** Null until paired: the snippets live on the bridge, so there is nothing to edit before. */
     onOpenSnippets: (() -> Unit)? = null,
+    /** Null until paired, for the same reason: the queue is the bridge's. */
+    onOpenInstalls: (() -> Unit)? = null,
 ) {
     Column(
         modifier
@@ -260,6 +262,12 @@ fun SettingsScreen(
             if (!state.canInstallApps) {
                 TextButton(onClick = onGrantInstallPermission) { Text("Allow") }
             }
+        }
+        onOpenInstalls?.let {
+            androidx.compose.material3.OutlinedButton(
+                onClick = it,
+                modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.TouchTarget),
+            ) { Text("Phone installs…") }
         }
 
         TextButton(onClick = onForget, modifier = Modifier.padding(top = 8.dp)) {
