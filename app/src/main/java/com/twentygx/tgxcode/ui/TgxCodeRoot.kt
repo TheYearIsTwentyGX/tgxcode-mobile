@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -33,6 +34,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -160,6 +162,7 @@ fun TgxCodeRoot(
     val orchPayloads by vm.orchestrators.payloads.collectAsStateWithLifecycle()
     val orchList by vm.orchestrators.orchestrators.collectAsStateWithLifecycle()
     val orchBusy by vm.orchestrators.busy.collectAsStateWithLifecycle()
+    val restartConfirm by vm.restartConfirm.collectAsStateWithLifecycle()
     var orchSettingsFor by rememberSaveable { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf<PickTarget?>(null) }
 
@@ -336,6 +339,14 @@ fun TgxCodeRoot(
                                             text = { Text("Scheduled messages") },
                                             onClick = { overflowOpen = false; laterOpen = true },
                                         )
+                                        // Only with a process to replace: with none, the next
+                                        // send starts one with today's tools anyway.
+                                        conversation?.takeIf { it.runner?.hasProcess == true }?.let { live ->
+                                            DropdownMenuItem(
+                                                text = { Text("Restart process") },
+                                                onClick = { overflowOpen = false; vm.restartProcess(live.sessionId) },
+                                            )
+                                        }
                                         val open = conversation
                                         val orchOn = open != null &&
                                             (orchPayloads[open.sessionId]?.enabled ?: (open.summary.orchestrator != null))
@@ -763,6 +774,21 @@ fun TgxCodeRoot(
             moving = null
             if (picked != null) vm.rescheduleMessage(message.id, picked.first)
         }
+    }
+
+    restartConfirm?.let { confirm ->
+        val tasks = if (confirm.count == 1) "1 background task" else "${confirm.count} background tasks"
+        AlertDialog(
+            onDismissRequest = vm::dismissRestartConfirm,
+            title = { Text("Restart the process?") },
+            text = { Text("$tasks will stop.") },
+            confirmButton = {
+                TextButton(onClick = { vm.restartProcess(confirm.sessionId, force = true) }) {
+                    Text("Restart", color = com.twentygx.tgxcode.ui.theme.tgx.red)
+                }
+            },
+            dismissButton = { TextButton(onClick = vm::dismissRestartConfirm) { Text("Keep them running") } },
+        )
     }
 
     orchSettingsFor?.let { id ->

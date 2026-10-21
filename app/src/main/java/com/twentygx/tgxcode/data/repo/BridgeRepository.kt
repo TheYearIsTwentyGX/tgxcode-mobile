@@ -23,7 +23,9 @@ import com.twentygx.tgxcode.data.model.QueueWriteResponse
 import com.twentygx.tgxcode.data.model.SessionPrsResponse
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.SendRequest
+import com.twentygx.tgxcode.data.model.RestartOutcome
 import com.twentygx.tgxcode.data.model.RunnerStatus
+import com.twentygx.tgxcode.data.model.restartOutcomeOf
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.data.model.StreamEvent
 import com.twentygx.tgxcode.data.model.SubscribeRequest
@@ -1612,6 +1614,35 @@ class BridgeRepository(
                 UserMessage("Could not stop: ${result.message()}", isError = true),
             )
         }
+    }
+
+    /**
+     * Replace the process, keeping the conversation. Every outcome but [RestartOutcome.Background]
+     * is said here; that one is handed back, because what it needs is a confirmation.
+     */
+    suspend fun restart(sessionId: String, force: Boolean = false): RestartOutcome {
+        val outcome = restartOutcomeOf(api.restart(sessionId, force))
+        when (outcome) {
+            is RestartOutcome.Restarted -> {
+                applyRestartStatus(sessionId, outcome.status)
+                _messages.emit(UserMessage("Restarted — new tools are available"))
+            }
+            is RestartOutcome.NoProcess -> {
+                applyRestartStatus(sessionId, outcome.status)
+                _messages.emit(UserMessage("No process running — the next message starts a fresh one"))
+            }
+            RestartOutcome.Busy ->
+                _messages.emit(UserMessage("Wait for the turn to finish, or stop it first."))
+            is RestartOutcome.Background -> Unit
+            is RestartOutcome.Failed ->
+                _messages.emit(UserMessage("Could not restart: ${outcome.message}", isError = true))
+        }
+        return outcome
+    }
+
+    private fun applyRestartStatus(sessionId: String, status: RunnerStatus?) {
+        status ?: return
+        currentIf(sessionId)?.let { _conversation.value = it.copy(runner = status) }
     }
 
     // ------------------------------------------------------------------ queue

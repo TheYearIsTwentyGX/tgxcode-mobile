@@ -16,7 +16,8 @@ package com.twentygx.tgxcode.core
  */
 sealed interface ApiResult<out T> {
     data class Ok<T>(val value: T) : ApiResult<T>
-    data class Http(val status: Int, val error: String?) : ApiResult<Nothing>
+    /** [body] is the raw response, for the few refusals that carry more than `error`. */
+    data class Http(val status: Int, val error: String?, val body: String? = null) : ApiResult<Nothing>
     data class Offline(val cause: Throwable) : ApiResult<Nothing>
     data class AccessDenied(val status: Int) : ApiResult<Nothing>
 }

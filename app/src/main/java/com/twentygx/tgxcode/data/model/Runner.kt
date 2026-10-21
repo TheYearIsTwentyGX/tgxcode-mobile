@@ -85,6 +85,10 @@ data class RunnerStatus(
             else -> RunnerState.Unknown
         }
 
+    /** A `claude` process is running for the session — what a restart replaces. */
+    val hasProcess: Boolean
+        get() = runnerState == RunnerState.Idle || isWorking
+
     /** The Stop button exists only while there is something to stop. */
     val isWorking: Boolean
         get() = runnerState == RunnerState.Busy || runnerState == RunnerState.Starting
