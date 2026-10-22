@@ -1,6 +1,7 @@
 package com.twentygx.tgxcode.ui.conversation
 
 import com.twentygx.tgxcode.core.PrettyJson
+import com.twentygx.tgxcode.core.toolDisplayName
 import com.twentygx.tgxcode.data.model.ToolEvent
 import com.twentygx.tgxcode.data.model.ToolResult
 import kotlinx.serialization.json.JsonElement
@@ -13,20 +14,18 @@ import kotlinx.serialization.json.JsonPrimitive
  * classpath.
  */
 
-private val MCP_PREFIX = Regex("^mcp__.+?__(.+)$")
-
 /**
- * Strips the `mcp__server__` prefix from an MCP tool name.
+ * An MCP tool name as the desktop draws it — [toolDisplayName].
  *
- * Done here rather than with `TextOverflow.Ellipsis`, because CSS-style truncation
- * cuts from the right and would keep exactly the half that says nothing:
+ * Done here rather than left to `TextOverflow.Ellipsis`, because truncation cuts from
+ * the right and would keep exactly the half that says nothing:
  * `mcp__plugin_playwright_playwright__browser_navigate` would render as
- * `mcp__plugin_playwri…` instead of `browser_navigate`.
+ * `mcp__plugin_playwri…` instead of `Playwright: Browser Navigate`.
  */
 fun toolLabel(name: String?): String {
     val raw = name?.trim().orEmpty()
     if (raw.isEmpty()) return "tool"
-    return MCP_PREFIX.find(raw)?.groupValues?.get(1) ?: raw
+    return toolDisplayName(raw)
 }
 
 /**

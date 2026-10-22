@@ -59,6 +59,7 @@ import com.twentygx.tgxcode.data.model.RestartRequest
 import com.twentygx.tgxcode.data.model.RestartResponse
 import com.twentygx.tgxcode.data.model.SendResponse
 import com.twentygx.tgxcode.data.model.SessionDetail
+import com.twentygx.tgxcode.data.model.SessionImages
 import com.twentygx.tgxcode.data.model.SessionPrsResponse
 import com.twentygx.tgxcode.data.model.SessionSuggestions
 import com.twentygx.tgxcode.data.model.SessionsResponse
@@ -150,6 +151,22 @@ class BridgeApi(
             "from" to from.toString(),
             "to" to to.toString(),
         )
+
+    /** Every image in the conversation, once each — the Images sheet. No bytes. */
+    suspend fun images(sessionId: String): ApiResult<SessionImages> =
+        get("api/sessions/${sessionId.encoded()}/images", serializer())
+
+    /**
+     * One image's bytes, by the key [images] named. Raw, not JSON, and immutable: the
+     * URL is the bytes' own hash, so a caller may keep them for good. A transcript
+     * rewritten since the list was read answers 404 rather than a different picture.
+     * Through [BridgeClients.api] like any route, so the token and the Access headers
+     * go with it — which is why this cannot be a URL handed to an image loader.
+     */
+    suspend fun imageBytes(sessionId: String, key: String): ApiResult<ByteArray> =
+        executeWith(clients.api, { config ->
+            Request.Builder().url(config.url("api/sessions/${sessionId.encoded()}/images/$key")).get().build()
+        }) { response -> response.body.bytes() }
 
     suspend fun subagent(sessionId: String, toolUseId: String, offset: Long = 0): ApiResult<SubagentResponse> =
         get(
@@ -827,6 +844,15 @@ class BridgeApi(
         deserializer: KSerializer<T>,
         client: OkHttpClient,
         build: (BridgeConfig) -> Request,
+    ): ApiResult<T> = executeWith(client, build) { response ->
+        AppJson.decodeFromString(deserializer, response.body.string())
+    }
+
+    /** [execute] with the success body read by [read] — JSON for every route but a raw one. */
+    private suspend fun <T> executeWith(
+        client: OkHttpClient,
+        build: (BridgeConfig) -> Request,
+        read: (okhttp3.Response) -> T,
     ): ApiResult<T> = withContext(Dispatchers.IO) {
         val config = configProvider()
         if (config == null) {
@@ -853,12 +879,12 @@ class BridgeApi(
                             "is the bridge machine on and cloudflared running?",
                     )
                 }
-                val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
+                    val text = response.body?.string().orEmpty()
                     Tgx.w("${response.request.method} ${response.request.url.encodedPath} -> ${response.code}")
                     return@withContext ApiResult.Http(response.code, errorOf(text, response.code), text)
                 }
-                ApiResult.Ok(AppJson.decodeFromString(deserializer, text))
+                ApiResult.Ok(read(response))
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled

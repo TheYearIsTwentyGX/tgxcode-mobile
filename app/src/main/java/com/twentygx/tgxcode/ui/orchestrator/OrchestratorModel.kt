@@ -415,7 +415,7 @@ fun stageLine(
         val b = blockedOn(w, inbox)
         val item = b?.item
         val age = item?.let { (now - it.at).let { ms -> if (ms < 60_000) "<1m" else shortAge(ms) } }
-        val tool = item?.ask?.let { it.displayName ?: it.tool }?.takeIf { w.pending == "tool" }
+        val tool = item?.ask?.toolLabel?.takeIf { w.pending == "tool" }
         val who = item?.let { if (it.status == "new") "the orchestrator has not read it yet" else "the orchestrator is on it" }
         WorkerLine(
             "${PENDING_WORD[w.pending] ?: "Something"} waiting" + (age?.let { " $it" } ?: ""),

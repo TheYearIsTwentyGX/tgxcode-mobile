@@ -70,6 +70,9 @@ class AppViewModel(
     /** For the one-off reads the files sheet makes; nothing about them is held. */
     val api = container.api
 
+    /** The Images sheet's pictures; the list itself is read fresh each time it opens. */
+    val chatImages = container.chatImages
+
     /** Slash commands for the open session, read on its first `/`. */
     private val _slash = MutableStateFlow<List<com.twentygx.tgxcode.data.model.SlashCommandInfo>>(emptyList())
     val slash: StateFlow<List<com.twentygx.tgxcode.data.model.SlashCommandInfo>> = _slash.asStateFlow()
@@ -1112,6 +1115,11 @@ class AppViewModel(
      * want of a browser — hence the fallback onto the snackbar rather than an
      * uncaught `ActivityNotFoundException`.
      */
+    /** A passing line for the snackbar, from a screen that has nothing else to say it with. */
+    fun notice(text: String) {
+        viewModelScope.launch { repo.report(text) }
+    }
+
     fun reportUnopenableUrl(url: String) = viewModelScope.launch {
         repo.report("No app here can open $url", isError = true)
     }

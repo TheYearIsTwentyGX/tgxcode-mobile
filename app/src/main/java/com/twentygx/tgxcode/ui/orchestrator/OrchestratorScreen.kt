@@ -505,7 +505,7 @@ private fun StuckBody(need: NeedItem.Stuck, now: Long, actions: OrchestratorActi
         // A tool ask is complete as `{requestId, decision}` — there is nothing to read
         // first, which is why it is the one answerable from here.
         item.ask?.let { ask ->
-            Text(ask.displayName ?: ask.tool ?: "A tool", style = TgxType.mono12, color = tgx.textMuted)
+            Text(ask.toolLabel ?: "A tool", style = TgxType.mono12, color = tgx.textMuted)
         }
         AskButton("Allow", { actions.onAnswerWorker(w.id, PermissionRequestBody(requestId, Decision.ALLOW)) }, kind = AskButtonKind.Affirmative)
         AskButton("Always", { actions.onAnswerWorker(w.id, PermissionRequestBody(requestId, Decision.ALLOW_ALWAYS)) })

@@ -65,6 +65,7 @@ import com.twentygx.tgxcode.data.repo.isRefused
 import com.twentygx.tgxcode.ui.common.ConnectionDot
 import com.twentygx.tgxcode.ui.common.DegradedBanner
 import com.twentygx.tgxcode.ui.common.RemoteBanner
+import com.twentygx.tgxcode.ui.conversation.ImagesSheet
 import com.twentygx.tgxcode.ui.conversation.ComposerControls
 import com.twentygx.tgxcode.ui.conversation.ChangesSheet
 import com.twentygx.tgxcode.ui.conversation.ConversationScreen
@@ -171,6 +172,9 @@ fun TgxCodeRoot(
     val projectColors by vm.status.projectColors.collectAsStateWithLifecycle()
     var quotaOpen by rememberSaveable { mutableStateOf(false) }
     var turnsOpen by rememberSaveable { mutableStateOf(false) }
+    var imagesOpen by rememberSaveable { mutableStateOf(false) }
+    /** Jump to message from the Images sheet, on its way to the conversation. */
+    var imageJump by remember { mutableStateOf<com.twentygx.tgxcode.data.model.ImageAnchor?>(null) }
     val agentView by vm.repo.agentView.collectAsStateWithLifecycle()
     val later by vm.workspace.later.collectAsStateWithLifecycle()
     val snippets by vm.workspace.snippets.collectAsStateWithLifecycle()
@@ -365,6 +369,10 @@ fun TgxCodeRoot(
                                         DropdownMenuItem(
                                             text = { Text("Changes and scratchpad") },
                                             onClick = { overflowOpen = false; filesOpen = true },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Images") },
+                                            onClick = { overflowOpen = false; imagesOpen = true },
                                         )
                                         DropdownMenuItem(
                                             text = { Text("Scheduled messages") },
@@ -578,6 +586,8 @@ fun TgxCodeRoot(
                         LaunchedEffect(hostId) { hostId?.let { vm.orchestrators.load(it) } }
                         // The overview is what an orchestrator opens on, as on the desktop.
                         var overview by rememberSaveable(sessionId) { mutableStateOf(true) }
+                        // Jump to message lands in the conversation, not on the overview.
+                        LaunchedEffect(imageJump) { if (imageJump != null) overview = false }
                         Column(Modifier.fillMaxSize()) {
                             if (isOrch) {
                                 val needs = orchPayload?.let {
@@ -694,6 +704,9 @@ fun TgxCodeRoot(
                                 onTurnsOpenChanged = { turnsOpen = it },
                                 later = later.filter { it.sessionId == sessionId },
                                 onOpenLater = { laterOpen = true },
+                                jumpToAnchor = imageJump,
+                                onAnchorTaken = { imageJump = null },
+                                onNotice = vm::notice,
                             )
                         }
                     }
@@ -811,6 +824,20 @@ fun TgxCodeRoot(
     val openId = conversation?.sessionId
     if (filesOpen && openId != null && onConversation) {
         ChangesSheet(api = vm.api, sessionId = openId, onDismiss = { filesOpen = false })
+    }
+    if (imagesOpen && openId != null && onConversation) {
+        ImagesSheet(
+            images = vm.chatImages,
+            sessionId = openId,
+            // The transcript growing, or a turn ending: a subagent's screenshots are
+            // finished then, though the session's own file need not have grown.
+            refreshKey = conversation?.offset to conversation?.runner?.state,
+            onJump = { anchor ->
+                imagesOpen = false
+                imageJump = anchor
+            },
+            onDismiss = { imagesOpen = false },
+        )
     }
     if (laterOpen && openId != null && onConversation) {
         LaterSheet(

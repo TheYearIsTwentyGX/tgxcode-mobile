@@ -36,7 +36,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.twentygx.tgxcode.data.model.ImageAnchor
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
+import com.twentygx.tgxcode.data.model.earlierStartFor
 import com.twentygx.tgxcode.data.model.PrDetail
 import com.twentygx.tgxcode.data.repo.Conversation
 import com.twentygx.tgxcode.ui.common.EmptyState
@@ -90,6 +92,11 @@ fun ConversationScreen(
     /** This session's scheduled messages, for the strip above the composer. */
     later: List<com.twentygx.tgxcode.data.model.LaterMessage> = emptyList(),
     onOpenLater: () -> Unit = {},
+    /** Where an image appeared, from the Images sheet's Jump to message; taken once. */
+    jumpToAnchor: ImageAnchor? = null,
+    onAnchorTaken: () -> Unit = {},
+    /** A passing line for the snackbar — a jump that has nowhere to land. */
+    onNotice: (String) -> Unit = {},
 ) {
     if (conversation == null) {
         // A just-created session is not readable until Claude Code has written its
@@ -253,6 +260,33 @@ fun ConversationScreen(
         // there is nothing to return to, and a request that can never be satisfied
         // should not outlive the load that made it.
         resumeAt = null
+    }
+
+    /**
+     * An image's occurrence, from the Images sheet. In hand: straight there. Above the
+     * window: load from the turn it sits in — the only kind of offset `/range` takes —
+     * and let [jumpTo] land it once it arrives. The same path the turn sheet takes.
+     */
+    LaunchedEffect(jumpToAnchor) {
+        val anchor = jumpToAnchor ?: return@LaunchedEffect
+        onAnchorTaken()
+        if (anchor.id in conversation.indexById) {
+            jumpTo = anchor.id
+            return@LaunchedEffect
+        }
+        val from = earlierStartFor(anchor, conversation.turns, conversation.windowStart)
+        when {
+            from != null -> {
+                jumpTo = anchor.id
+                onLoadEarlier(from)
+            }
+            // A `?tail=` cut from a bridge with no turn index: load it all.
+            conversation.turns.isEmpty() && conversation.hasEarlier -> {
+                jumpTo = anchor.id
+                onLoadEarlier(null)
+            }
+            else -> onNotice("That image is not in the loaded transcript.")
+        }
     }
 
     /** A jump lands once its turn is in hand — straight away if it already was. */

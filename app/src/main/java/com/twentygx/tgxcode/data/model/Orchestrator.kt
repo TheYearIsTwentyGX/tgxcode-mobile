@@ -1,5 +1,6 @@
 package com.twentygx.tgxcode.data.model
 
+import com.twentygx.tgxcode.core.toolDisplayName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
@@ -216,7 +217,10 @@ data class InboxAsk(
     val tool: String? = null,
     val displayName: String? = null,
     val input: JsonObject = JsonObject(emptyMap()),
-)
+) {
+    /** As [Ask.toolLabel]: the bridge's name when it sent one, else the raw one made readable. */
+    val toolLabel: String? get() = displayName ?: tool?.let(::toolDisplayName)
+}
 
 /**
  * One inbox row. [kind] is `question`, `update` or `done` (a worker's own report),
