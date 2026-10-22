@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -264,6 +265,13 @@ fun ConversationScreen(
     }
 
     Column(modifier.fillMaxSize()) {
+        // The project's colour, as a rule under the top bar — enough to know which
+        // checkout this is at a glance, and nothing at all when it has none.
+        com.twentygx.tgxcode.ui.theme.projectAccent(conversation.summary.cwd ?: conversation.summary.projectCwd)?.let {
+            androidx.compose.foundation.layout.Box(
+                Modifier.fillMaxWidth().height(2.dp).background(it),
+            )
+        }
         PrChips(conversation.prs, onOpenUrl)
         ChecklistBar(conversation.checklist, conversation.sessionId)
 

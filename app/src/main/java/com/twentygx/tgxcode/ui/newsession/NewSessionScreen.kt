@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -240,6 +241,14 @@ fun NewSessionScreen(
                 onClick = { dirMenu = true },
                 modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.FieldHeight),
             ) {
+                com.twentygx.tgxcode.ui.theme.projectAccent(cwd)?.let { c ->
+                    Box(
+                        Modifier
+                            .padding(end = 8.dp)
+                            .size(8.dp)
+                            .background(c, androidx.compose.foundation.shape.CircleShape),
+                    )
+                }
                 Text(
                     dirs.firstOrNull { it.path == cwd }?.label ?: cwd ?: "Pick a directory",
                     maxLines = 1,

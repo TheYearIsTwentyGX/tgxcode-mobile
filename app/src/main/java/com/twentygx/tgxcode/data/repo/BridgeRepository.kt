@@ -894,7 +894,8 @@ class BridgeRepository(
             is StreamEvent.NotificationResolved, is StreamEvent.NotificationRead,
             is StreamEvent.NotificationsCleared,
             is StreamEvent.LaterChanged, is StreamEvent.SnippetsChanged,
-            is StreamEvent.SchedulesChanged, is StreamEvent.SlashCommandsChanged -> Unit
+            is StreamEvent.SchedulesChanged, is StreamEvent.SlashCommandsChanged,
+            is StreamEvent.PrefsChanged -> Unit
         }
     }
 

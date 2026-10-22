@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -136,6 +137,14 @@ fun BoardCardItem(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            com.twentygx.tgxcode.ui.theme.projectAccent(card.cwd)?.let { c ->
+                androidx.compose.foundation.layout.Box(
+                    Modifier
+                        .padding(start = 8.dp, bottom = 5.dp)
+                        .size(8.dp)
+                        .background(c, androidx.compose.foundation.shape.CircleShape),
+                )
+            }
             if (card.place.isNotBlank()) {
                 Text(
                     card.place,

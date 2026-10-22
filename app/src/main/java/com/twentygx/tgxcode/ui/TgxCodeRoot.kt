@@ -134,6 +134,7 @@ fun TgxCodeRoot(
     val quota by vm.status.quota.collectAsStateWithLifecycle()
     val refreshingQuota by vm.status.refreshingQuota.collectAsStateWithLifecycle()
     val inbox by vm.status.inbox.collectAsStateWithLifecycle()
+    val projectColors by vm.status.projectColors.collectAsStateWithLifecycle()
     var quotaOpen by rememberSaveable { mutableStateOf(false) }
     var turnsOpen by rememberSaveable { mutableStateOf(false) }
     val agentView by vm.repo.agentView.collectAsStateWithLifecycle()
@@ -250,359 +251,364 @@ fun TgxCodeRoot(
         .map { it.sessionId }
         .toSet()
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbar) },
-        topBar = {
-            val remote = health?.remote == true
-            // Degraded outranks remote rather than stacking with it: polling only
-            // happens remotely, so the two would say overlapping things, and only one
-            // banner may exist (see below).
-            val degraded = connection == ConnState.Polling
-            val banner = degraded || remote
-            Column {
-                // Whichever element is on top owns the status-bar inset, and only
-                // one of them may. This is mobile.css's `.banner ~ .bar {
-                // padding-top: 0 }` — without it the banner paints under the clock.
-                if (degraded) {
-                    DegradedBanner(Modifier.windowInsetsPadding(WindowInsets.statusBars))
-                } else if (remote) {
-                    RemoteBanner(
-                        health?.host,
-                        Modifier.windowInsetsPadding(WindowInsets.statusBars),
-                    )
-                }
-                TopAppBar(
-                    windowInsets =
-                        if (banner) WindowInsets(0) else TopAppBarDefaults.windowInsets,
-                    title = {
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    navigationIcon = {
-                        if (pushed) {
-                            IconButton(onClick = {
-                                if (onConversation) vm.closeConversation()
-                                if (onSubagent) vm.closeAgent()
-                                if (!nav.popBackStack()) nav.navigate(Sessions)
-                            }) { Text("‹", style = MaterialTheme.typography.titleMedium) }
-                        }
-                    },
-                    actions = {
-                        // Off the conversation, where the title needs the width and the
-                        // composer already says what the session is doing.
-                        if (onConversation && conversation?.let { it.turns.isNotEmpty() || it.events.isNotEmpty() } == true) {
-                            IconButton(onClick = { turnsOpen = true }) {
-                                Icon(Icons.Default.List, contentDescription = "Turns")
-                            }
-                        }
-                        if (onConversation && conversation != null) {
-                            Box {
-                                IconButton(onClick = { overflowOpen = true }) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = "More")
-                                }
-                                DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Changes and scratchpad") },
-                                        onClick = { overflowOpen = false; filesOpen = true },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Scheduled messages") },
-                                        onClick = { overflowOpen = false; laterOpen = true },
-                                    )
-                                }
-                            }
-                        }
-                        if (onTasks) {
-                            IconButton(onClick = { nav.navigate(Schedules) }) {
-                                Icon(Icons.Default.DateRange, contentDescription = "Schedules")
-                            }
-                        }
-                        if (!onConversation && !onSubagent) {
-                            QuotaPill(quota, onClick = { quotaOpen = true })
-                            if (!onNotifications) {
-                                IconButton(onClick = { nav.navigate(Notifications) }) {
-                                    BadgedBox(badge = {
-                                        if (inbox.unread > 0) Badge { Text("${inbox.unread}") }
-                                    }) { Icon(Icons.Default.Notifications, contentDescription = "History") }
-                                }
-                            }
-                        }
-                        ConnectionDot(connection, Modifier.padding(end = 8.dp))
-                        IconButton(onClick = { nav.navigate(Settings) }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ),
-                )
-            }
-        },
-        bottomBar = {
-            if (showTabs) {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    modifier = Modifier.heightIn(min = Metrics.TabsHeight),
-                ) {
-                    NavigationBarItem(
-                        selected = destination?.hasRoute(Sessions::class) == true,
-                        onClick = { nav.navigateTab(Sessions) },
-                        icon = {
-                            // The waiting badge lives here now that the needs-you cards
-                            // do: a badge on one tab pointing at a section of another
-                            // would send you to the wrong place.
-                            BadgedBox(badge = {
-                                val waiting = board?.waiting ?: 0
-                                if (waiting > 0) Badge { Text("$waiting") }
-                            }) { Icon(Icons.Default.List, contentDescription = null) }
-                        },
-                        label = { Text("Sessions") },
-                    )
-                    NavigationBarItem(
-                        selected = destination?.hasRoute(Tasks::class) == true,
-                        onClick = { nav.navigateTab(Tasks) },
-                        icon = {
-                            // Counts what is *open*, never what the filter is showing.
-                            BadgedBox(badge = {
-                                if (openTasks > 0) Badge { Text("$openTasks") }
-                            }) { Icon(Icons.Default.CheckCircle, contentDescription = null) }
-                        },
-                        label = { Text("Tasks") },
-                    )
-                    NavigationBarItem(
-                        selected = destination?.hasRoute(NewSession::class) == true,
-                        onClick = { nav.navigateTab(NewSession) },
-                        icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                        label = { Text("New") },
-                    )
-                }
-            }
-        },
-    ) { insets ->
-        Box(Modifier.padding(insets)) {
-            // A gate, not a destination: with no token every tab leads somewhere
-            // that cannot load, so there are no tabs.
-            if (connection == ConnState.NotPaired && !onSettings) {
-                NotPairedScreen(onOpenSettings = { nav.navigate(Settings) })
-                return@Box
-            }
-
-            NavHost(navController = nav, startDestination = Sessions) {
-                composable<Sessions> {
-                    PullToRefreshBox(
-                        isRefreshing = refreshing,
-                        onRefresh = vm::refresh,
-                    ) {
-                        SessionsScreen(
-                            sessions = sessions,
-                            board = board,
-                            answering = answering,
-                            askingSessions = askingSessions,
-                            filter = filter,
-                            onFilterChanged = { filter = it },
-                            onOpen = { nav.navigate(Conversation(it)) },
-                            onAnswer = { ask, decision -> vm.answerFromBoard(ask, decision) },
-                            prs = prs,
-                            onOptions = vm::openSessionSheet,
-                            showArchived = showArchived,
-                            onShowArchivedChanged = { showArchived = it },
+    // The desktop's project colours, for any row that wants to wear one.
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.twentygx.tgxcode.ui.theme.LocalProjectColors provides projectColors,
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            snackbarHost = { SnackbarHost(snackbar) },
+            topBar = {
+                val remote = health?.remote == true
+                // Degraded outranks remote rather than stacking with it: polling only
+                // happens remotely, so the two would say overlapping things, and only one
+                // banner may exist (see below).
+                val degraded = connection == ConnState.Polling
+                val banner = degraded || remote
+                Column {
+                    // Whichever element is on top owns the status-bar inset, and only
+                    // one of them may. This is mobile.css's `.banner ~ .bar {
+                    // padding-top: 0 }` — without it the banner paints under the clock.
+                    if (degraded) {
+                        DegradedBanner(Modifier.windowInsetsPadding(WindowInsets.statusBars))
+                    } else if (remote) {
+                        RemoteBanner(
+                            health?.host,
+                            Modifier.windowInsetsPadding(WindowInsets.statusBars),
                         )
                     }
-                }
-                composable<Tasks> {
-                    PullToRefreshBox(
-                        isRefreshing = refreshing,
-                        onRefresh = vm::refresh,
-                    ) {
-                        TasksScreen(
-                            tasks = tasks,
-                            filter = taskFilter,
-                            acting = acting,
-                            onFilterChanged = vm::setTaskFilter,
-                            actions = taskActions,
-                        )
-                    }
-                }
-                composable<NewSession> {
-                    val dirs = remember(sessions) { recentDirs(sessions) }
-                    LaunchedEffect(dirs) {
-                        if (newSession.cwd == null) dirs.firstOrNull()?.let { vm.setNewCwd(it.path) }
-                    }
-                    NewSessionScreen(
-                        dirs = dirs,
-                        cwd = newSession.cwd,
-                        onCwdChanged = vm::setNewCwd,
-                        mode = newSession.mode,
-                        modes = health?.offeredModes().orEmpty(),
-                        onModeChanged = vm::setNewMode,
-                        model = newSession.model,
-                        onModelChanged = vm::setNewModel,
-                        effort = newSession.effort,
-                        onEffortChanged = vm::setNewEffort,
-                        prompt = newSession.prompt,
-                        onPromptChanged = vm::setNewPrompt,
-                        test = newSession.test,
-                        onTestChanged = vm::setNewTest,
-                        starting = newSession.starting,
-                        savingDraft = newSession.savingDraft,
-                        error = newSession.error,
-                        drafts = drafts,
-                        editingDraftId = newSession.editingDraftId,
-                        onStart = { vm.startSession { id -> nav.navigate(Conversation(id)) } },
-                        onSaveDraft = vm::saveDraft,
-                        onEditDraft = vm::editDraft,
-                        onStartDraft = { draft ->
-                            vm.startDraft(draft) { id -> nav.navigate(Conversation(id)) }
-                        },
-                        onDeleteDraft = vm::deleteDraft,
-                        onClearDraftEdit = vm::clearDraftEdit,
-                    )
-                }
-                composable<Conversation> { backStackEntry ->
-                    val route = backStackEntry.toRoute<Conversation>()
-                    LaunchedEffect(route.sessionId) { vm.open(route.sessionId) }
-                    val mode = vm.modeFor(route.sessionId)
-                    val sessionId = route.sessionId
-                    ConversationScreen(
-                        conversation = conversation?.takeIf { it.sessionId == route.sessionId },
-                        expandedTools = vm.expandedTools,
-                        onToggleTool = vm::toggleTool,
-                        draft = draft,
-                        onDraftChanged = vm::setDraft,
-                        mode = mode,
-                        modes = health?.offeredModes().orEmpty(),
-                        onModeChanged = { vm.setMode(route.sessionId, it) },
-                        sending = sending,
-                        answering = answering.isNotEmpty(),
-                        nowMillis = now,
-                        onSend = {
-                            vm.send(sessionId, mode) { id ->
-                                nav.navigate(Conversation(id)) {
-                                    popUpTo(Conversation(sessionId)) { inclusive = true }
-                                }
-                            }
-                        },
-                        onStop = { vm.stop(route.sessionId) },
-                        onAnswer = { body -> vm.answer(route.sessionId, body) },
-                        onLoadAll = vm::loadAll,
-                        onOpenUrl = openUrl,
-                        starting = opening == route.sessionId,
-                        suggestionActions = taskActions,
-                        acting = acting,
-                        controls = ComposerControls(
-                            model = vm.modelFor(sessionId),
-                            onModelChanged = { vm.setModel(sessionId, it) },
-                            effort = vm.effortFor(sessionId),
-                            onEffortChanged = { vm.setEffort(sessionId, it) },
-                            branchBanner = branch?.takeIf { it.sessionId == sessionId }?.banner,
-                            onCancelBranch = vm::cancelBranch,
-                            snippets = remember(snippets, conversation?.summary?.cwd) {
-                                val cwd = conversation?.summary?.cwd
-                                snippets.snippets.filter { it.appliesIn(cwd) }
-                            },
-                            snippetGroups = snippets.groups,
-                            onSendCanned = { text, snippetMode -> vm.sendCanned(sessionId, text, snippetMode) },
-                            slashCommands = slash,
-                            onWantSlashCommands = { vm.loadSlashCommands(sessionId) },
-                            onScheduleSend = { at, chosen -> vm.scheduleSend(sessionId, at, chosen) },
-                        ),
-                        userActions = remember(sessionId) {
-                            UserTurnActions(
-                                onEditResend = vm::editAndResend,
-                                onEditBranch = { vm.editAndBranch(sessionId, it) },
+                    TopAppBar(
+                        windowInsets =
+                            if (banner) WindowInsets(0) else TopAppBarDefaults.windowInsets,
+                        title = {
+                            Text(
+                                title,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         },
-                        onDropQueued = { vm.dropQueued(sessionId, it) },
-                        onMoveQueued = { id, by -> vm.moveQueued(sessionId, id, by) },
-                        onLoadEarlier = vm::loadEarlier,
-                        onOpenAgent = { toolUseId, title ->
-                            vm.openAgent(sessionId, toolUseId, title)
-                            nav.navigate(Subagent(sessionId, toolUseId))
+                        navigationIcon = {
+                            if (pushed) {
+                                IconButton(onClick = {
+                                    if (onConversation) vm.closeConversation()
+                                    if (onSubagent) vm.closeAgent()
+                                    if (!nav.popBackStack()) nav.navigate(Sessions)
+                                }) { Text("‹", style = MaterialTheme.typography.titleMedium) }
+                            }
                         },
-                        turnsOpen = turnsOpen,
-                        onTurnsOpenChanged = { turnsOpen = it },
-                        later = later.filter { it.sessionId == sessionId },
-                        onOpenLater = { laterOpen = true },
+                        actions = {
+                            // Off the conversation, where the title needs the width and the
+                            // composer already says what the session is doing.
+                            if (onConversation && conversation?.let { it.turns.isNotEmpty() || it.events.isNotEmpty() } == true) {
+                                IconButton(onClick = { turnsOpen = true }) {
+                                    Icon(Icons.Default.List, contentDescription = "Turns")
+                                }
+                            }
+                            if (onConversation && conversation != null) {
+                                Box {
+                                    IconButton(onClick = { overflowOpen = true }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = "More")
+                                    }
+                                    DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("Changes and scratchpad") },
+                                            onClick = { overflowOpen = false; filesOpen = true },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Scheduled messages") },
+                                            onClick = { overflowOpen = false; laterOpen = true },
+                                        )
+                                    }
+                                }
+                            }
+                            if (onTasks) {
+                                IconButton(onClick = { nav.navigate(Schedules) }) {
+                                    Icon(Icons.Default.DateRange, contentDescription = "Schedules")
+                                }
+                            }
+                            if (!onConversation && !onSubagent) {
+                                QuotaPill(quota, onClick = { quotaOpen = true })
+                                if (!onNotifications) {
+                                    IconButton(onClick = { nav.navigate(Notifications) }) {
+                                        BadgedBox(badge = {
+                                            if (inbox.unread > 0) Badge { Text("${inbox.unread}") }
+                                        }) { Icon(Icons.Default.Notifications, contentDescription = "History") }
+                                    }
+                                }
+                            }
+                            ConnectionDot(connection, Modifier.padding(end = 8.dp))
+                            IconButton(onClick = { nav.navigate(Settings) }) {
+                                Icon(Icons.Default.Settings, contentDescription = "Settings")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
                     )
                 }
-                composable<Subagent> { backStackEntry ->
-                    val route = backStackEntry.toRoute<Subagent>()
-                    // Re-entered on the way back from a nested subagent, whose open
-                    // replaced this one's view — so it asks for its own again.
-                    LaunchedEffect(route.toolUseId) {
-                        if (vm.repo.agentView.value?.toolUseId != route.toolUseId) {
-                            vm.openAgent(route.sessionId, route.toolUseId, null)
+            },
+            bottomBar = {
+                if (showTabs) {
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier.heightIn(min = Metrics.TabsHeight),
+                    ) {
+                        NavigationBarItem(
+                            selected = destination?.hasRoute(Sessions::class) == true,
+                            onClick = { nav.navigateTab(Sessions) },
+                            icon = {
+                                // The waiting badge lives here now that the needs-you cards
+                                // do: a badge on one tab pointing at a section of another
+                                // would send you to the wrong place.
+                                BadgedBox(badge = {
+                                    val waiting = board?.waiting ?: 0
+                                    if (waiting > 0) Badge { Text("$waiting") }
+                                }) { Icon(Icons.Default.List, contentDescription = null) }
+                            },
+                            label = { Text("Sessions") },
+                        )
+                        NavigationBarItem(
+                            selected = destination?.hasRoute(Tasks::class) == true,
+                            onClick = { nav.navigateTab(Tasks) },
+                            icon = {
+                                // Counts what is *open*, never what the filter is showing.
+                                BadgedBox(badge = {
+                                    if (openTasks > 0) Badge { Text("$openTasks") }
+                                }) { Icon(Icons.Default.CheckCircle, contentDescription = null) }
+                            },
+                            label = { Text("Tasks") },
+                        )
+                        NavigationBarItem(
+                            selected = destination?.hasRoute(NewSession::class) == true,
+                            onClick = { nav.navigateTab(NewSession) },
+                            icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                            label = { Text("New") },
+                        )
+                    }
+                }
+            },
+        ) { insets ->
+            Box(Modifier.padding(insets)) {
+                // A gate, not a destination: with no token every tab leads somewhere
+                // that cannot load, so there are no tabs.
+                if (connection == ConnState.NotPaired && !onSettings) {
+                    NotPairedScreen(onOpenSettings = { nav.navigate(Settings) })
+                    return@Box
+                }
+
+                NavHost(navController = nav, startDestination = Sessions) {
+                    composable<Sessions> {
+                        PullToRefreshBox(
+                            isRefreshing = refreshing,
+                            onRefresh = vm::refresh,
+                        ) {
+                            SessionsScreen(
+                                sessions = sessions,
+                                board = board,
+                                answering = answering,
+                                askingSessions = askingSessions,
+                                filter = filter,
+                                onFilterChanged = { filter = it },
+                                onOpen = { nav.navigate(Conversation(it)) },
+                                onAnswer = { ask, decision -> vm.answerFromBoard(ask, decision) },
+                                prs = prs,
+                                onOptions = vm::openSessionSheet,
+                                showArchived = showArchived,
+                                onShowArchivedChanged = { showArchived = it },
+                            )
                         }
                     }
-                    // The system back gesture skips the top bar's arrow, so the follow is
-                    // dropped here too — otherwise the bridge keeps tailing an agent
-                    // nobody is looking at.
-                    androidx.activity.compose.BackHandler {
-                        vm.closeAgent()
-                        nav.popBackStack()
+                    composable<Tasks> {
+                        PullToRefreshBox(
+                            isRefreshing = refreshing,
+                            onRefresh = vm::refresh,
+                        ) {
+                            TasksScreen(
+                                tasks = tasks,
+                                filter = taskFilter,
+                                acting = acting,
+                                onFilterChanged = vm::setTaskFilter,
+                                actions = taskActions,
+                            )
+                        }
                     }
-                    SubagentScreen(
-                        view = agentView?.takeIf { it.toolUseId == route.toolUseId },
-                        expandedTools = vm.expandedTools,
-                        onToggleTool = vm::toggleTool,
-                        onOpenAgent = { toolUseId, title ->
-                            vm.openAgent(route.sessionId, toolUseId, title)
-                            nav.navigate(Subagent(route.sessionId, toolUseId))
-                        },
-                    )
-                }
-                composable<Notifications> {
-                    NotificationsScreen(
-                        inbox = inbox,
-                        onOpenSession = { nav.navigate(Conversation(it)) },
-                        onMarkSessionRead = { vm.status.markRead(it) },
-                        onMarkAllRead = { vm.status.markRead(null) },
-                        onClear = vm.status::clear,
-                    )
-                }
-                composable<Schedules> {
-                    val schedules by vm.workspace.schedules.collectAsStateWithLifecycle()
-                    LaunchedEffect(Unit) { vm.workspace.loadSchedules() }
-                    SchedulesScreen(
-                        schedules = schedules,
-                        dirs = remember(sessions) { recentDirs(sessions) },
-                        modes = health?.offeredModes().orEmpty(),
-                        api = vm.api,
-                        onSetEnabled = vm::setScheduleEnabled,
-                        onRun = { vm.runSchedule(it) { id -> nav.navigate(Conversation(id)) } },
-                        onDelete = { vm.workspace.deleteSchedule(it.id) },
-                        onSave = vm::saveSchedule,
-                        onOpenSession = { nav.navigate(Conversation(it)) },
-                    )
-                }
-                composable<Snippets> {
-                    SnippetsScreen(
-                        payload = snippets,
-                        modes = health?.offeredModes().orEmpty(),
-                        onSave = vm::saveSnippet,
-                        onDelete = { vm.workspace.deleteSnippet(it.id) },
-                        onMove = vm.workspace::moveSnippet,
-                        onSaveGroup = vm::saveSnippetGroup,
-                        onDeleteGroup = { vm.workspace.deleteGroup(it.id) },
-                    )
-                }
-                composable<Settings> {
-                    SettingsScreen(
-                        state = settingsUi,
-                        onPasteChanged = vm::onPaste,
-                        onOriginChanged = vm::onOrigin,
-                        onTokenChanged = vm::onToken,
-                        onTest = vm::test,
-                        onSave = vm::save,
-                        onForget = vm::forget,
-                        onStayConnectedChanged = onStayConnected,
-                        onOpenSnippets = { nav.navigate(Snippets) }.takeIf { connection != ConnState.NotPaired && connection != ConnState.Unconfigured },
-                    )
+                    composable<NewSession> {
+                        val dirs = remember(sessions) { recentDirs(sessions) }
+                        LaunchedEffect(dirs) {
+                            if (newSession.cwd == null) dirs.firstOrNull()?.let { vm.setNewCwd(it.path) }
+                        }
+                        NewSessionScreen(
+                            dirs = dirs,
+                            cwd = newSession.cwd,
+                            onCwdChanged = vm::setNewCwd,
+                            mode = newSession.mode,
+                            modes = health?.offeredModes().orEmpty(),
+                            onModeChanged = vm::setNewMode,
+                            model = newSession.model,
+                            onModelChanged = vm::setNewModel,
+                            effort = newSession.effort,
+                            onEffortChanged = vm::setNewEffort,
+                            prompt = newSession.prompt,
+                            onPromptChanged = vm::setNewPrompt,
+                            test = newSession.test,
+                            onTestChanged = vm::setNewTest,
+                            starting = newSession.starting,
+                            savingDraft = newSession.savingDraft,
+                            error = newSession.error,
+                            drafts = drafts,
+                            editingDraftId = newSession.editingDraftId,
+                            onStart = { vm.startSession { id -> nav.navigate(Conversation(id)) } },
+                            onSaveDraft = vm::saveDraft,
+                            onEditDraft = vm::editDraft,
+                            onStartDraft = { draft ->
+                                vm.startDraft(draft) { id -> nav.navigate(Conversation(id)) }
+                            },
+                            onDeleteDraft = vm::deleteDraft,
+                            onClearDraftEdit = vm::clearDraftEdit,
+                        )
+                    }
+                    composable<Conversation> { backStackEntry ->
+                        val route = backStackEntry.toRoute<Conversation>()
+                        LaunchedEffect(route.sessionId) { vm.open(route.sessionId) }
+                        val mode = vm.modeFor(route.sessionId)
+                        val sessionId = route.sessionId
+                        ConversationScreen(
+                            conversation = conversation?.takeIf { it.sessionId == route.sessionId },
+                            expandedTools = vm.expandedTools,
+                            onToggleTool = vm::toggleTool,
+                            draft = draft,
+                            onDraftChanged = vm::setDraft,
+                            mode = mode,
+                            modes = health?.offeredModes().orEmpty(),
+                            onModeChanged = { vm.setMode(route.sessionId, it) },
+                            sending = sending,
+                            answering = answering.isNotEmpty(),
+                            nowMillis = now,
+                            onSend = {
+                                vm.send(sessionId, mode) { id ->
+                                    nav.navigate(Conversation(id)) {
+                                        popUpTo(Conversation(sessionId)) { inclusive = true }
+                                    }
+                                }
+                            },
+                            onStop = { vm.stop(route.sessionId) },
+                            onAnswer = { body -> vm.answer(route.sessionId, body) },
+                            onLoadAll = vm::loadAll,
+                            onOpenUrl = openUrl,
+                            starting = opening == route.sessionId,
+                            suggestionActions = taskActions,
+                            acting = acting,
+                            controls = ComposerControls(
+                                model = vm.modelFor(sessionId),
+                                onModelChanged = { vm.setModel(sessionId, it) },
+                                effort = vm.effortFor(sessionId),
+                                onEffortChanged = { vm.setEffort(sessionId, it) },
+                                branchBanner = branch?.takeIf { it.sessionId == sessionId }?.banner,
+                                onCancelBranch = vm::cancelBranch,
+                                snippets = remember(snippets, conversation?.summary?.cwd) {
+                                    val cwd = conversation?.summary?.cwd
+                                    snippets.snippets.filter { it.appliesIn(cwd) }
+                                },
+                                snippetGroups = snippets.groups,
+                                onSendCanned = { text, snippetMode -> vm.sendCanned(sessionId, text, snippetMode) },
+                                slashCommands = slash,
+                                onWantSlashCommands = { vm.loadSlashCommands(sessionId) },
+                                onScheduleSend = { at, chosen -> vm.scheduleSend(sessionId, at, chosen) },
+                            ),
+                            userActions = remember(sessionId) {
+                                UserTurnActions(
+                                    onEditResend = vm::editAndResend,
+                                    onEditBranch = { vm.editAndBranch(sessionId, it) },
+                                )
+                            },
+                            onDropQueued = { vm.dropQueued(sessionId, it) },
+                            onMoveQueued = { id, by -> vm.moveQueued(sessionId, id, by) },
+                            onLoadEarlier = vm::loadEarlier,
+                            onOpenAgent = { toolUseId, title ->
+                                vm.openAgent(sessionId, toolUseId, title)
+                                nav.navigate(Subagent(sessionId, toolUseId))
+                            },
+                            turnsOpen = turnsOpen,
+                            onTurnsOpenChanged = { turnsOpen = it },
+                            later = later.filter { it.sessionId == sessionId },
+                            onOpenLater = { laterOpen = true },
+                        )
+                    }
+                    composable<Subagent> { backStackEntry ->
+                        val route = backStackEntry.toRoute<Subagent>()
+                        // Re-entered on the way back from a nested subagent, whose open
+                        // replaced this one's view — so it asks for its own again.
+                        LaunchedEffect(route.toolUseId) {
+                            if (vm.repo.agentView.value?.toolUseId != route.toolUseId) {
+                                vm.openAgent(route.sessionId, route.toolUseId, null)
+                            }
+                        }
+                        // The system back gesture skips the top bar's arrow, so the follow is
+                        // dropped here too — otherwise the bridge keeps tailing an agent
+                        // nobody is looking at.
+                        androidx.activity.compose.BackHandler {
+                            vm.closeAgent()
+                            nav.popBackStack()
+                        }
+                        SubagentScreen(
+                            view = agentView?.takeIf { it.toolUseId == route.toolUseId },
+                            expandedTools = vm.expandedTools,
+                            onToggleTool = vm::toggleTool,
+                            onOpenAgent = { toolUseId, title ->
+                                vm.openAgent(route.sessionId, toolUseId, title)
+                                nav.navigate(Subagent(route.sessionId, toolUseId))
+                            },
+                        )
+                    }
+                    composable<Notifications> {
+                        NotificationsScreen(
+                            inbox = inbox,
+                            onOpenSession = { nav.navigate(Conversation(it)) },
+                            onMarkSessionRead = { vm.status.markRead(it) },
+                            onMarkAllRead = { vm.status.markRead(null) },
+                            onClear = vm.status::clear,
+                        )
+                    }
+                    composable<Schedules> {
+                        val schedules by vm.workspace.schedules.collectAsStateWithLifecycle()
+                        LaunchedEffect(Unit) { vm.workspace.loadSchedules() }
+                        SchedulesScreen(
+                            schedules = schedules,
+                            dirs = remember(sessions) { recentDirs(sessions) },
+                            modes = health?.offeredModes().orEmpty(),
+                            api = vm.api,
+                            onSetEnabled = vm::setScheduleEnabled,
+                            onRun = { vm.runSchedule(it) { id -> nav.navigate(Conversation(id)) } },
+                            onDelete = { vm.workspace.deleteSchedule(it.id) },
+                            onSave = vm::saveSchedule,
+                            onOpenSession = { nav.navigate(Conversation(it)) },
+                        )
+                    }
+                    composable<Snippets> {
+                        SnippetsScreen(
+                            payload = snippets,
+                            modes = health?.offeredModes().orEmpty(),
+                            onSave = vm::saveSnippet,
+                            onDelete = { vm.workspace.deleteSnippet(it.id) },
+                            onMove = vm.workspace::moveSnippet,
+                            onSaveGroup = vm::saveSnippetGroup,
+                            onDeleteGroup = { vm.workspace.deleteGroup(it.id) },
+                        )
+                    }
+                    composable<Settings> {
+                        SettingsScreen(
+                            state = settingsUi,
+                            onPasteChanged = vm::onPaste,
+                            onOriginChanged = vm::onOrigin,
+                            onTokenChanged = vm::onToken,
+                            onTest = vm::test,
+                            onSave = vm::save,
+                            onForget = vm::forget,
+                            onStayConnectedChanged = onStayConnected,
+                            onOpenSnippets = { nav.navigate(Snippets) }.takeIf { connection != ConnState.NotPaired && connection != ConnState.Unconfigured },
+                        )
+                    }
                 }
             }
         }

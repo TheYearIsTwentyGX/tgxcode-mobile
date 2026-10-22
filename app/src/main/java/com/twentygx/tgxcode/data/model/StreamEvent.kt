@@ -207,4 +207,8 @@ sealed interface StreamEvent {
     /** That directory's slash commands changed; drop what was cached. */
     @Serializable
     data class SlashCommandsChanged(val cwd: String? = null, val at: Long? = null) : StreamEvent
+
+    /** The user-level settings, whole, after any change — in another window included. */
+    @Serializable
+    data class PrefsChanged(val prefs: Prefs) : StreamEvent
 }

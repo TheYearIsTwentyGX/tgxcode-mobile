@@ -9,6 +9,7 @@ import com.twentygx.tgxcode.data.model.NotificationRow
 import com.twentygx.tgxcode.data.model.Quota
 import com.twentygx.tgxcode.data.model.TaskList
 import com.twentygx.tgxcode.data.model.Overview
+import com.twentygx.tgxcode.data.model.Prefs
 import com.twentygx.tgxcode.data.model.PrsPayload
 import com.twentygx.tgxcode.data.model.RunnerStatus
 import com.twentygx.tgxcode.data.model.StreamEvent
@@ -56,6 +57,7 @@ object SseCodec {
         "schedules-changed" ->
             StreamEvent.SchedulesChanged(AppJson.decodeFromString(serializer<SchedulesPayload>(), data))
         "slash-commands" -> AppJson.decodeFromString<StreamEvent.SlashCommandsChanged>(data)
+        "prefs" -> StreamEvent.PrefsChanged(AppJson.decodeFromString(serializer<Prefs>(), data))
         "notification" ->
             StreamEvent.NotificationFiled(AppJson.decodeFromString(serializer<NotificationRow>(), data))
 
