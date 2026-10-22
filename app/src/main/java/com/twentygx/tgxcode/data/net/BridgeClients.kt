@@ -178,6 +178,16 @@ class BridgeClients(
         .callTimeout(120, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * APKs from the phone-installs queue. Tens of megabytes over a cell link through a
+     * tunnel, so no whole-call bound worth the name — but a read that stalls for a
+     * minute is a dead transfer, not a slow one, and fails so the record can say so.
+     */
+    val download: OkHttpClient = base.newBuilder()
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.MINUTES)
+        .build()
+
     fun shutdown() {
         base.dispatcher.executorService.shutdown()
         base.connectionPool.evictAll()

@@ -9,6 +9,16 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
+      Phone installs: APKs the desktop queues for this phone. REQUEST_INSTALL_PACKAGES
+      is what lets the "Install unknown apps" switch exist for TGXCode at all; the
+      other two are normal permissions that make an update silent
+      (USER_ACTION_NOT_REQUIRED, API 31+) and keep it so (update ownership, API 34+).
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <uses-permission android:name="android.permission.ENFORCE_UPDATE_OWNERSHIP" />
+
+    <!--
       Android 16's Local Network Protections will gate a direct socket to an RFC1918
       address (the dev bridge on the LAN) behind this permission. Declared now, and
       requested lazily only when the active profile's host is a private literal — the
@@ -113,6 +123,10 @@
 
         <receiver
             android:name=".service.AskActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".service.InstallResultReceiver"
             android:exported="false" />
 
         <receiver

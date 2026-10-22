@@ -3,6 +3,7 @@ package com.twentygx.tgxcode.di
 import android.content.Context
 import com.twentygx.tgxcode.data.attach.AttachmentSource
 import com.twentygx.tgxcode.data.attach.Uploader
+import com.twentygx.tgxcode.data.install.PhoneInstaller
 import com.twentygx.tgxcode.data.net.BridgeApi
 import com.twentygx.tgxcode.data.net.BridgeClients
 import com.twentygx.tgxcode.data.net.BridgeConfig
@@ -60,6 +61,9 @@ class AppContainer(context: Context) {
 
     /** Orchestrators: each one's payload, and the list a task can be handed to. */
     val orchestrators = OrchestratorStore(api, repository, appScope)
+
+    /** APKs the desktop queues for this phone, installed through PackageInstaller. */
+    val phoneInstalls = PhoneInstaller(appContext, api, repository, settings, config, appScope)
 
     /** Reads picked files off the phone. */
     val attachmentSource = AttachmentSource(appContext)

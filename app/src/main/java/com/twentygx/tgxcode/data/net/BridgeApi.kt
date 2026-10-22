@@ -47,6 +47,8 @@ import com.twentygx.tgxcode.data.model.TaskWithdrawn
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.data.model.Prefs
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
+import com.twentygx.tgxcode.data.model.PhoneInstallStatus
+import com.twentygx.tgxcode.data.model.PhoneInstallsResponse
 import com.twentygx.tgxcode.data.model.PrsPayload
 import com.twentygx.tgxcode.data.model.RangeResponse
 import com.twentygx.tgxcode.data.model.SubagentResponse
@@ -67,6 +69,7 @@ import com.twentygx.tgxcode.data.model.SuggestionsResponse
 import com.twentygx.tgxcode.data.model.TaskStatus
 import com.twentygx.tgxcode.data.model.UploadedAttachment
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonObject
@@ -549,6 +552,92 @@ class BridgeApi(
             serializer(),
         )
 
+    // ---------------------------------------------------------- phone installs
+
+    /** Newest first — what a client reads on (re)connect to catch a `pending` it missed. */
+    suspend fun phoneInstalls(): ApiResult<PhoneInstallsResponse> =
+        get("api/phone-installs", serializer())
+
+    /**
+     * Report a state. `downloading` is the claim on a `pending` record, and a `409` on
+     * it means another phone has it.
+     *
+     * @param viewer what the bridge keys a claim on (`X-TGXCode-Viewer`). Sent here and
+     *   nowhere else: on any other route it says "this client polls and shows asks",
+     *   which is not what this app means by it.
+     */
+    suspend fun phoneInstallStatus(
+        id: String,
+        body: PhoneInstallStatus,
+        viewer: String,
+    ): ApiResult<JsonObject> = execute(serializer(), clients.api) { config ->
+        Request.Builder()
+            .url(config.url("api/phone-installs/${id.encoded()}/status"))
+            .header("X-TGXCode-Viewer", viewer)
+            .post(AppJson.encodeToString(body).toRequestBody(JSON_MEDIA))
+            .build()
+    }
+
+    /**
+     * Stream the APK to [dest], hashing it on the way, so a large one never sits in
+     * memory and the check costs no second read. Verification is the caller's: this
+     * reports what arrived, not whether it is right.
+     */
+    suspend fun downloadPhoneInstall(id: String, dest: java.io.File): ApiResult<DownloadedApk> =
+        withContext(Dispatchers.IO) {
+            val config = configProvider() ?: return@withContext ApiResult.Http(0, "No bridge configured")
+            val request = Request.Builder()
+                .url(config.url("api/phone-installs/${id.encoded()}/apk"))
+                .get()
+                .build()
+            try {
+                clients.download.newCall(request).execute().use { response ->
+                    if (AccessChallenge.isChallenge(response)) {
+                        Tgx.w("GET ${request.url.encodedPath} -> ${response.code}: Cloudflare Access refused it")
+                        return@withContext ApiResult.AccessDenied(response.code)
+                    }
+                    if (!response.isSuccessful) {
+                        val text = response.body.string()
+                        Tgx.w("GET ${request.url.encodedPath} -> ${response.code}")
+                        return@withContext ApiResult.Http(response.code, errorOf(text, response.code))
+                    }
+                    val body = response.body
+                    val digest = java.security.MessageDigest.getInstance("SHA-256")
+                    var written = 0L
+                    dest.parentFile?.mkdirs()
+                    body.byteStream().use { input ->
+                        dest.outputStream().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                digest.update(buffer, 0, n)
+                                output.write(buffer, 0, n)
+                                written += n
+                            }
+                        }
+                    }
+                    ApiResult.Ok(
+                        DownloadedApk(
+                            file = dest,
+                            size = written,
+                            sha256 = digest.digest().joinToString("") { "%02x".format(it) },
+                            headerSha256 = response.header("X-SHA256"),
+                            contentLength = body.contentLength().takeIf { it >= 0 },
+                        ),
+                    )
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                dest.delete()
+                throw cancelled
+            } catch (t: Throwable) {
+                Tgx.w("download failed", t)
+                dest.delete()
+                ApiResult.Offline(t)
+            }
+        }
+
     // ---------------------------------------------------------------- plumbing
 
     private suspend fun <T> get(
@@ -666,6 +755,17 @@ class BridgeApi(
         AppJson.parseToJsonElement(body).let { it as JsonObject }["error"]?.jsonPrimitive?.content
     }.getOrNull() ?: "HTTP $code"
 }
+
+/** What arrived, measured on the way in. */
+data class DownloadedApk(
+    val file: java.io.File,
+    val size: Long,
+    /** Lower-case hex, of the bytes written. */
+    val sha256: String,
+    /** The bridge's own `X-SHA256`, if it sent one. */
+    val headerSha256: String?,
+    val contentLength: Long?,
+)
 
 private fun String.encoded(): String =
     java.net.URLEncoder.encode(this, Charsets.UTF_8.name()).replace("+", "%20")

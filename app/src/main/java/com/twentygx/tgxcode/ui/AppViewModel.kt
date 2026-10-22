@@ -36,6 +36,7 @@ import com.twentygx.tgxcode.data.repo.isRefused
 import com.twentygx.tgxcode.data.settings.SettingsStore
 import com.twentygx.tgxcode.di.AppContainer
 import com.twentygx.tgxcode.service.BridgeService
+import com.twentygx.tgxcode.service.InstallNotifications
 import com.twentygx.tgxcode.ui.sessions.PrSheetState
 import com.twentygx.tgxcode.ui.settings.ProbeResult
 import com.twentygx.tgxcode.ui.settings.SettingsUiState
@@ -181,6 +182,16 @@ class AppViewModel(
         viewModelScope.launch {
             container.settings.stayConnected.collect { on ->
                 _settingsUi.value = _settingsUi.value.copy(stayConnected = on)
+            }
+        }
+        viewModelScope.launch {
+            container.phoneInstalls.enabled.collect { on ->
+                _settingsUi.value = _settingsUi.value.copy(installApps = on)
+            }
+        }
+        viewModelScope.launch {
+            container.phoneInstalls.canInstall.collect { can ->
+                _settingsUi.value = _settingsUi.value.copy(canInstallApps = can)
             }
         }
         // Show what is actually stored. Leaving the token blank made the form look
@@ -737,6 +748,25 @@ class AppViewModel(
     fun applyStayConnected(on: Boolean) = viewModelScope.launch {
         container.settings.setStayConnected(on)
         if (on) BridgeService.start(container.appContext) else BridgeService.stop(container.appContext)
+    }
+
+    fun setInstallApps(on: Boolean) {
+        container.phoneInstalls.setEnabled(on)
+    }
+
+    /**
+     * The per-app "Install unknown apps" screen. Coming back is a resume, which re-reads
+     * the grant and carries on anything that was waiting for it.
+     */
+    fun grantInstallPermission() {
+        runCatching {
+            container.appContext.startActivity(
+                InstallNotifications.unknownSourcesIntent(container.appContext)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure {
+            viewModelScope.launch { repo.report("Couldn't open the install-apps setting on this phone", isError = true) }
+        }
     }
 
     /**

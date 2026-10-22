@@ -7,7 +7,7 @@ import androidx.core.content.getSystemService
 import com.twentygx.tgxcode.R
 
 /**
- * Three channels, split so the user can mute the chatter and keep the one that
+ * Five channels, split so the user can mute the chatter and keep the one that
  * matters. Importance is user-owned after creation, so these are created once and
  * never touched again — if the user has lowered [ASKS], the Settings screen says so
  * rather than trying to put it back.
@@ -21,6 +21,12 @@ object Channels {
 
     /** Turn errors, warnings, messages that failed to send. */
     const val ACTIVITY = "activity"
+
+    /** A phone install waiting on you: a tap to confirm, or the unknown-apps grant. */
+    const val INSTALLS = "installs"
+
+    /** How a phone install ended. Quiet: you asked for it at the desk. */
+    const val INSTALL_RESULTS = "install_results"
 
     fun create(context: Context) {
         val manager = context.getSystemService<NotificationManager>() ?: return
@@ -55,6 +61,28 @@ object Channels {
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
                 description = context.getString(R.string.channel_activity_desc)
+                setShowBadge(false)
+            },
+        )
+
+        manager.createNotificationChannel(
+            NotificationChannel(
+                INSTALLS,
+                context.getString(R.string.channel_installs_name),
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = context.getString(R.string.channel_installs_desc)
+                setShowBadge(true)
+            },
+        )
+
+        manager.createNotificationChannel(
+            NotificationChannel(
+                INSTALL_RESULTS,
+                context.getString(R.string.channel_install_results_name),
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = context.getString(R.string.channel_install_results_desc)
                 setShowBadge(false)
             },
         )

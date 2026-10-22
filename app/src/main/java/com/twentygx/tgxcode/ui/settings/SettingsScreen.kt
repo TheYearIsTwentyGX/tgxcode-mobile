@@ -57,6 +57,8 @@ fun SettingsScreen(
     onSave: () -> Unit,
     onForget: () -> Unit,
     onStayConnectedChanged: (Boolean) -> Unit,
+    onInstallAppsChanged: (Boolean) -> Unit,
+    onGrantInstallPermission: () -> Unit,
     modifier: Modifier = Modifier,
     /** Null until paired: the snippets live on the bridge, so there is nothing to edit before. */
     onOpenSnippets: (() -> Unit)? = null,
@@ -224,6 +226,42 @@ fun SettingsScreen(
             Switch(checked = state.stayConnected, onCheckedChange = onStayConnectedChanged)
         }
 
+        // Phone installs. The grant row shows whether or not the toggle is on: it is
+        // the half that cannot be fixed from here, so it should be visible before the
+        // first install trips over it.
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Install apps sent from the desktop", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "An agent that builds an Android app can send it here instead of using " +
+                        "adb. Updates to apps TGXCode installed go on silently; anything " +
+                        "else asks for one tap.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tgx.textMuted,
+                )
+            }
+            Switch(checked = state.installApps, onCheckedChange = onInstallAppsChanged)
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Install unknown apps", style = MaterialTheme.typography.labelMedium, color = tgx.textMuted)
+                Text(
+                    if (state.canInstallApps) "Allowed" else "Not allowed — installs will wait for it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (state.canInstallApps) tgx.green else tgx.yellow,
+                )
+            }
+            if (!state.canInstallApps) {
+                TextButton(onClick = onGrantInstallPermission) { Text("Allow") }
+            }
+        }
+
         TextButton(onClick = onForget, modifier = Modifier.padding(top = 8.dp)) {
             Text("Forget this bridge", color = tgx.red)
         }
@@ -242,6 +280,8 @@ data class SettingsUiState(
     val testing: Boolean = false,
     val probe: ProbeResult? = null,
     val stayConnected: Boolean = false,
+    val installApps: Boolean = true,
+    val canInstallApps: Boolean = false,
 ) {
     /** One of the two Access fields without the other — never saved, never sent. */
     val accessHalfSet: Boolean get() = accessId.isBlank() != accessSecret.isBlank()

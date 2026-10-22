@@ -7,10 +7,13 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.twentygx.tgxcode.data.install.Claim
 import com.twentygx.tgxcode.data.net.BridgeConfig
 import com.twentygx.tgxcode.data.net.PairingInput
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("tgxcode")
 
@@ -33,6 +36,11 @@ class SettingsStore(private val context: Context) {
         val ACCESS_ID = stringPreferencesKey("access_id")
         /** Ciphertext, through the same [TokenCipher] as the bearer token. */
         val ACCESS_SECRET = stringPreferencesKey("access_secret_enc")
+        val INSTALL_APPS = booleanPreferencesKey("install_apps")
+        /** JSON list of [Claim] — the phone installs in flight. */
+        val INSTALL_CLAIMS = stringPreferencesKey("phone_install_claims")
+        /** A random id the bridge keys this phone's install claims on. */
+        val INSTALL_VIEWER = stringPreferencesKey("phone_install_viewer")
     }
 
     val config: Flow<BridgeConfig?> = context.dataStore.data.map { prefs ->
@@ -53,6 +61,39 @@ class SettingsStore(private val context: Context) {
      */
     val stayConnected: Flow<Boolean> =
         context.dataStore.data.map { it[Keys.BACKGROUND] ?: false }
+
+    /**
+     * On by default: an install the desktop sends is something somebody asked for, and
+     * every one that is not silent still waits for a tap on the phone.
+     */
+    val installApps: Flow<Boolean> =
+        context.dataStore.data.map { it[Keys.INSTALL_APPS] ?: true }
+
+    suspend fun setInstallApps(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.INSTALL_APPS] = enabled }
+    }
+
+    suspend fun installClaims(): List<Claim> =
+        Claim.decode(context.dataStore.data.first()[Keys.INSTALL_CLAIMS])
+
+    /** Read-modify-write inside one edit, so two installs finishing together both land. */
+    suspend fun updateInstallClaims(change: (List<Claim>) -> List<Claim>) {
+        context.dataStore.edit { prefs ->
+            val next = change(Claim.decode(prefs[Keys.INSTALL_CLAIMS]))
+            if (next.isEmpty()) prefs.remove(Keys.INSTALL_CLAIMS)
+            else prefs[Keys.INSTALL_CLAIMS] = Claim.encode(next)
+        }
+    }
+
+    /** Made once and kept, so a claim made before a restart is still this phone's after it. */
+    suspend fun installViewerId(): String {
+        context.dataStore.data.first()[Keys.INSTALL_VIEWER]?.let { return it }
+        var id = ""
+        context.dataStore.edit { prefs ->
+            id = prefs[Keys.INSTALL_VIEWER] ?: "phone-${UUID.randomUUID()}".also { prefs[Keys.INSTALL_VIEWER] = it }
+        }
+        return id
+    }
 
     suspend fun save(config: BridgeConfig) {
         context.dataStore.edit { prefs ->

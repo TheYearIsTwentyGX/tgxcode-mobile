@@ -80,6 +80,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Coming back from the "Install unknown apps" screen is a resume, and is the moment
+    // a phone install waiting on that grant can carry on.
+    override fun onResume() {
+        super.onResume()
+        (application as TgxApp).container.phoneInstalls.onResume()
+    }
+
+    override fun onPause() {
+        (application as TgxApp).container.phoneInstalls.onPause()
+        super.onPause()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
