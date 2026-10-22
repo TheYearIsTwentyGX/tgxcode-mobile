@@ -3,6 +3,7 @@ package com.twentygx.tgxcode.di
 import android.content.Context
 import com.twentygx.tgxcode.data.attach.AttachmentSource
 import com.twentygx.tgxcode.data.attach.Uploader
+import com.twentygx.tgxcode.data.background.BackgroundHealth
 import com.twentygx.tgxcode.data.install.PhoneInstaller
 import com.twentygx.tgxcode.data.net.BridgeApi
 import com.twentygx.tgxcode.data.net.BridgeClients
@@ -64,6 +65,12 @@ class AppContainer(context: Context) {
 
     /** APKs the desktop queues for this phone, installed through PackageInstaller. */
     val phoneInstalls = PhoneInstaller(appContext, api, repository, settings, config, appScope)
+
+    /** What keeps installs arriving with the app closed, and the Settings card that says so. */
+    val background = BackgroundHealth(
+        appContext, repository, phoneInstalls, settings, stayConnected, clients.streamPulse, appScope,
+        onNetworkChanged = ::onNetworkChanged,
+    )
 
     /** Reads picked files off the phone. */
     val attachmentSource = AttachmentSource(appContext)

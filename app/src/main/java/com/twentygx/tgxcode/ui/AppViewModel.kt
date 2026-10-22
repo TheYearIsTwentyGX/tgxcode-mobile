@@ -778,6 +778,9 @@ class AppViewModel(
     /** The phone-installs queue, for the Installs screen. */
     val phoneInstalls = container.phoneInstalls
 
+    /** The Settings card's "Background installs", and the one-time battery prompt. */
+    val background = container.background
+
     private val _retryingInstalls = MutableStateFlow<Set<String>>(emptySet())
     val retryingInstalls: StateFlow<Set<String>> = _retryingInstalls.asStateFlow()
 

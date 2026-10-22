@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.twentygx.tgxcode.data.install.Claim
@@ -41,6 +42,14 @@ class SettingsStore(private val context: Context) {
         val INSTALL_CLAIMS = stringPreferencesKey("phone_install_claims")
         /** A random id the bridge keys this phone's install claims on. */
         val INSTALL_VIEWER = stringPreferencesKey("phone_install_viewer")
+
+        // What the Settings card's "Background installs" rows read, kept here so they
+        // survive the process: the case worth diagnosing is the one where it was killed.
+        val BG_CONNECTED_AT = longPreferencesKey("bg_connected_at")
+        val BG_EVENT_AT = longPreferencesKey("bg_event_at")
+        val BG_CHECK_AT = longPreferencesKey("bg_check_at")
+        val BG_CHECK_RESULT = stringPreferencesKey("bg_check_result")
+        val BG_BATTERY_ASKED = booleanPreferencesKey("bg_battery_asked")
     }
 
     val config: Flow<BridgeConfig?> = context.dataStore.data.map { prefs ->
@@ -106,6 +115,37 @@ class SettingsStore(private val context: Context) {
             if (config.accessSecret.isBlank()) prefs.remove(Keys.ACCESS_SECRET)
             else prefs[Keys.ACCESS_SECRET] = TokenCipher.encrypt(config.accessSecret)
         }
+    }
+
+    /** Epoch millis of the last time the bridge was reached, and of the last event from it. */
+    val lastConnectedAt: Flow<Long?> = context.dataStore.data.map { it[Keys.BG_CONNECTED_AT] }
+    val lastEventAt: Flow<Long?> = context.dataStore.data.map { it[Keys.BG_EVENT_AT] }
+
+    suspend fun setLastConnectedAt(at: Long) {
+        context.dataStore.edit { it[Keys.BG_CONNECTED_AT] = at }
+    }
+
+    suspend fun setLastEventAt(at: Long) {
+        context.dataStore.edit { it[Keys.BG_EVENT_AT] = at }
+    }
+
+    /** When the fallback check last ran, and what it found. */
+    val lastCheck: Flow<Pair<Long, String?>?> = context.dataStore.data.map { prefs ->
+        prefs[Keys.BG_CHECK_AT]?.let { it to prefs[Keys.BG_CHECK_RESULT] }
+    }
+
+    suspend fun setLastCheck(at: Long, result: String) {
+        context.dataStore.edit {
+            it[Keys.BG_CHECK_AT] = at
+            it[Keys.BG_CHECK_RESULT] = result
+        }
+    }
+
+    /** Whether the one-time battery prompt has been shown. */
+    suspend fun batteryAsked(): Boolean = context.dataStore.data.first()[Keys.BG_BATTERY_ASKED] ?: false
+
+    suspend fun setBatteryAsked() {
+        context.dataStore.edit { it[Keys.BG_BATTERY_ASKED] = true }
     }
 
     suspend fun setStayConnected(enabled: Boolean) {

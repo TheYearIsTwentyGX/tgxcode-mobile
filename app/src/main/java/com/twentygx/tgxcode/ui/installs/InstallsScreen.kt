@@ -64,7 +64,47 @@ fun InstallsScreen(
     retrying: Set<String>,
     onRetry: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** False shows the banner: Android may freeze the app, and installs wait for it. */
+    batteryExempt: Boolean = true,
+    onAllowBattery: () -> Unit = {},
+    onAppDetails: () -> Unit = {},
 ) {
+    Column(modifier.fillMaxSize()) {
+        if (!batteryExempt) BatteryBanner(onAllowBattery, onAppDetails)
+        InstallList(records, now, retrying, onRetry)
+    }
+}
+
+/**
+ * Why installs only happen with the app open, on the screen where that is noticed.
+ * Settings has the same fix among the other background checks.
+ */
+@Composable
+private fun BatteryBanner(onAllow: () -> Unit, onAppDetails: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(tgx.s2)
+            .padding(horizontal = Metrics.ScreenPadding, vertical = 10.dp),
+    ) {
+        Text("Installs may wait until you open TGXCode", style = MaterialTheme.typography.bodyMedium, color = tgx.yellow)
+        Text(
+            "Android is optimising TGXCode's battery use, so it can freeze the app and drop its " +
+                "connection. Let it run in the background, and on a Motorola also set App info → " +
+                "App battery usage → Allow background usage.",
+            style = MaterialTheme.typography.bodySmall,
+            color = tgx.textMuted,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onAllow) { Text("Allow") }
+            TextButton(onClick = onAppDetails) { Text("App info") }
+        }
+    }
+    HorizontalDivider(color = tgx.outlineSoft)
+}
+
+@Composable
+private fun InstallList(records: List<PhoneInstall>?, now: Long, retrying: Set<String>, onRetry: (String) -> Unit) {
     if (records.isNullOrEmpty()) {
         EmptyState(
             headline = if (records == null) "Loading…" else "Nothing sent yet",
@@ -73,11 +113,10 @@ fun InstallsScreen(
             } else {
                 "APKs an agent sends to this phone show up here, with how each install went."
             },
-            modifier = modifier,
         )
         return
     }
-    LazyColumn(modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize()) {
         items(records, key = { it.id }) { record ->
             InstallRow(
                 record = record,

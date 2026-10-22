@@ -12,6 +12,8 @@ lifecycle = "2.11.0"
 composeBom = "2026.08.00"
 navigationCompose = "2.9.8"
 datastore = "1.2.1"
+# The fallback install check: a periodic job that does not depend on the socket.
+work = "2.11.2"
 
 okhttp = "5.5.0"
 serialization = "1.11.0"
@@ -35,6 +37,7 @@ androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", 
 androidx-lifecycle-service = { module = "androidx.lifecycle:lifecycle-service", version.ref = "lifecycle" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
+androidx-work-runtime = { module = "androidx.work:work-runtime", version.ref = "work" }
 
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-ui = { module = "androidx.compose.ui:ui" }

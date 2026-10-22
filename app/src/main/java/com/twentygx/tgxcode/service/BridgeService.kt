@@ -6,9 +6,12 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.ServiceCompat
 import com.twentygx.tgxcode.TgxApp
 import com.twentygx.tgxcode.core.Tgx
+import com.twentygx.tgxcode.data.background.BackgroundRules
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.StreamEvent
 import com.twentygx.tgxcode.data.repo.ConnState
@@ -16,6 +19,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -70,10 +76,35 @@ class BridgeService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** Set when Android refused the foreground start, so nothing else runs. */
+    private var refused = false
+
+    /** Keeps the CPU up while the connection comes back. See [BackgroundRules.holdAwake]. */
+    private val wakeLock: PowerManager.WakeLock? by lazy {
+        getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "TGXCode:reconnect")
+            ?.apply { setReferenceCounted(false) }
+    }
+
     override fun onCreate() {
         super.onCreate()
         val app = application as TgxApp
-        startForeground(connecting())
+        try {
+            startForeground(connecting())
+        } catch (t: Throwable) {
+            // ForegroundServiceStartNotAllowedException, most often on a START_STICKY
+            // restart after Android or the OEM's battery manager killed the process:
+            // the system recreates the service from the background, where a foreground
+            // start needs an exemption (the battery one, usually). Uncaught, this
+            // crashed the process, and the restart after that crashed again. The
+            // fallback check takes over until the app is next opened.
+            Tgx.w("connection service could not go foreground: ${t.javaClass.simpleName}: ${t.message}")
+            refused = true
+            InstallCheckWorker.checkNow(this)
+            stopSelf()
+            return
+        }
+        _running.value = true
 
         val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope = serviceScope
@@ -88,7 +119,20 @@ class BridgeService : Service() {
     }
 
     private suspend fun watchConnection(app: TgxApp) {
+        var outageStartedAt: Long? = null
         app.container.repository.connection.collectLatest { state ->
+            // The backoff's `delay` does not run while the CPU sleeps, so without this a
+            // stream that drops with the screen off stays dropped until something else
+            // wakes the phone. For the first couple of minutes of an outage only.
+            val now = SystemClock.elapsedRealtime()
+            val down = state == ConnState.Offline || state == ConnState.Connecting
+            outageStartedAt = if (down) outageStartedAt ?: now else null
+            if (BackgroundRules.holdAwake(state, outageStartedAt, now)) {
+                wakeLock?.acquire(BackgroundRules.WAKE_DURING_OUTAGE_MILLIS - (now - outageStartedAt!!))
+            } else {
+                wakeLock?.takeIf { it.isHeld }?.release()
+            }
+
             val waiting = app.container.repository.board.value?.waiting ?: 0
             val notice = when (state) {
                 ConnState.Live -> AskNotifications.ServiceState(
@@ -233,7 +277,8 @@ class BridgeService : Service() {
         )
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        if (refused) START_NOT_STICKY else START_STICKY
 
     /**
      * Defensive: `specialUse` has no documented timeout, but implementing this costs
@@ -247,6 +292,8 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         Tgx.d("service stopping")
+        _running.value = false
+        wakeLock?.takeIf { it.isHeld }?.release()
         lease?.close()
         lease = null
         job?.cancel()
@@ -258,8 +305,21 @@ class BridgeService : Service() {
     }
 
     companion object {
-        fun start(context: Context) {
+        private val _running = MutableStateFlow(false)
+
+        /** Whether the service is up in this process — the Settings card's first row. */
+        val running: StateFlow<Boolean> = _running.asStateFlow()
+
+        /**
+         * False when Android refused: from the background, without an exemption, it
+         * may. The caller falls back to [InstallCheckWorker].
+         */
+        fun start(context: Context): Boolean = try {
             context.startForegroundService(Intent(context, BridgeService::class.java))
+            true
+        } catch (t: Throwable) {
+            Tgx.w("connection service not started: ${t.javaClass.simpleName}: ${t.message}")
+            false
         }
 
         fun stop(context: Context) {

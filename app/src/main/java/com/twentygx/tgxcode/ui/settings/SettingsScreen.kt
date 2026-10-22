@@ -64,6 +64,11 @@ fun SettingsScreen(
     onOpenSnippets: (() -> Unit)? = null,
     /** Null until paired, for the same reason: the queue is the bridge's. */
     onOpenInstalls: (() -> Unit)? = null,
+    /** "Background installs". Null leaves the plain grant row in its place. */
+    background: com.twentygx.tgxcode.data.background.BackgroundStatus? = null,
+    now: Long = 0,
+    onBackgroundFix: (com.twentygx.tgxcode.data.background.BackgroundRules.Fix) -> Unit = {},
+    onAppDetails: () -> Unit = {},
 ) {
     Column(
         modifier
@@ -247,7 +252,10 @@ fun SettingsScreen(
             }
             Switch(checked = state.installApps, onCheckedChange = onInstallAppsChanged)
         }
-        Row(
+        // The card carries the grant as one of its rows, with the same button.
+        if (background != null) {
+            BackgroundCard(status = background, now = now, onFix = onBackgroundFix, onAppDetails = onAppDetails)
+        } else Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {

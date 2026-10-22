@@ -262,8 +262,9 @@ install once sat `downloading` on the desk with nothing to say why.
   the CPU awake, so a download and its commit finish with the app in the background
   and the screen off. Its notification is the ongoing **Downloading … / Installing …**
   one, with a determinate bar, on **Install results**; the result notification takes
-  over when it ends. Android will not start a foreground service from the background;
-  then *Stay connected*'s service, if on, is what keeps the process.
+  over when it ends. Android will not start a foreground service from the background
+  without the battery exemption; then a WorkManager job keeps the process instead (see
+  *Installs with the app closed*).
 - *Reconnects.* The work runs on the app-wide scope, not the connection's, so the
   stream dropping or the bridge restarting does not cancel it.
 - *Stalls.* No bytes for 60s fails the attempt, whatever the socket is doing. There is
@@ -324,6 +325,36 @@ next start the app compares any claim still `installing` with the package's
 Notifications need the notification permission, which the app asks for when *Stay
 connected in the background* is turned on. Without it, installs still happen, but an
 app that needs a tap waits silently.
+
+## Installs with the app closed
+
+The design always meant an install to arrive with TGXCode closed: *Stay connected*'s
+service holds the stream and `PhoneInstaller` hears `phone_install` on it. On a phone
+with aggressive battery management (a Motorola Razr, say) it mostly only happened once
+the app was opened, because nothing recovered when the phone did what phones do. What
+covers each case now, mostly in `data/background/`:
+
+| What goes wrong | What recovers it |
+|---|---|
+| Battery optimisation freezes the app, cuts its network in Doze, and refuses a foreground service started from the background | The **battery exemption**. The first install that arrives without it asks once (a dialog on screen, a notification off it), and Settings and the Installs screen keep the button. Motorola adds a switch of its own, **App info → App battery usage → Allow background usage**; with that restricted the service may not start at all, so both screens link App info too. |
+| Android kills the service, then refuses its `START_STICKY` restart from the background | `BridgeService.onCreate` catches the refusal instead of crashing (it used to crash, and the restart after it crashed again), and hands over to the fallback check. Opening the app restarts the service if *Stay connected* is on. |
+| Wi-Fi to cellular, or the network coming back, leaves the stream on a dead interface | A default-network callback drops the stream and reconnects at once. `AppContainer.onNetworkChanged` said it was called from one; nothing registered it before. |
+| A half-open socket while the phone sleeps | The 40s read timeout and the reconnect backoff both run on the monotonic clock, which stops in deep sleep, and a dead socket never wakes the phone. So the stream's bytes, `: ping` included, are timestamped on `elapsedRealtime` (`StreamPulse`), and a **pulse alarm** about every ten minutes (inexact, allowed while idle, no exact-alarm permission) reconnects a stream that has been silent for over three pings. The service also holds a wake lock for the first two minutes of an outage, so the backoff actually runs. |
+| No socket at all | **`InstallCheckWorker`**, a 15-minute WorkManager job on a network constraint, reads `GET /api/phone-installs` and starts anything pending or this phone's unfinished, with the same pick-up rule the stream uses. It also restarts the service where allowed and checks the stream. Enqueued uniquely at app start, boot and update. |
+| `InstallService` (`dataSync`) refused from the background | The job itself keeps the process: a running job holds a wake lock, so it waits for the queue to drain, up to nine of its ten minutes. `PhoneInstaller` asks for an expedited one-off job whenever the service is refused. |
+| A reboot or a self-update | `BootReceiver` books the job and starts the service. `specialUse` may be started from `BOOT_COMPLETED` at API 35+ (the restricted types are `dataSync`, `camera`, `mediaPlayback`, `phoneCall`, `mediaProjection` and `microphone`), and `MY_PACKAGE_REPLACED` is an exemption of its own. If either is refused anyway, the check runs at once. After an update it always runs, so the desk hears `installed` without waiting. |
+
+**Settings → Background installs** shows each of these with a fix button: whether the
+service is running, when the bridge was last reached and the last event arrived, the
+battery exemption, *Install unknown apps*, notifications, and when the fallback check
+last ran and what it found. The times are kept on disk, because the case worth
+diagnosing is the one where the process was killed.
+
+Silent installs need nothing from the foreground: a `USER_ACTION_NOT_REQUIRED` commit
+works from a service or a job, and a result that needs a tap arrives at
+`InstallResultReceiver` in a fresh process if need be and becomes a notification.
+Without the notification permission that tap waits silently, which is why it is one of
+the card's rows.
 
 ## When the network will not carry a stream
 
