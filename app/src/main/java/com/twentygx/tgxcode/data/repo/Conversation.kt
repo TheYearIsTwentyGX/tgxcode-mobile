@@ -6,6 +6,7 @@ import com.twentygx.tgxcode.data.model.PrDetail
 import com.twentygx.tgxcode.data.model.RunnerStatus
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.data.model.SuggestionDecision
+import com.twentygx.tgxcode.data.model.TaskList
 import com.twentygx.tgxcode.data.model.ToolEvent
 import com.twentygx.tgxcode.data.model.ToolResultEvent
 import com.twentygx.tgxcode.data.model.TranscriptEvent
@@ -55,6 +56,12 @@ data class Conversation(
     val prs: List<PrDetail> = emptyList(),
     /** Whether GitHub was reachable when [prs] was read. Null before the first read. */
     val prsGh: GhReach? = null,
+    /**
+     * The agent's own checklist. `task-list` is sent once as soon as the session is
+     * followed and then only when it moves, so this is filled without a read of its own
+     * when streaming — and polled while not.
+     */
+    val checklist: TaskList? = null,
 )
 
 /**

@@ -123,6 +123,38 @@ object AskNotifications {
         )
     }
 
+    private const val STALLED_ID_BASE = 3000
+
+    private fun stalledIdFor(sessionId: String): Int = STALLED_ID_BASE + sessionId.hashCode().and(0x3FF)
+
+    /**
+     * A busy turn has gone silent. On the activity channel, not asks: nothing is waiting
+     * on you, it is only worth knowing — and the bridge sends `stalled: false` when it
+     * recovers or ends, which takes this down again.
+     */
+    @SuppressLint("MissingPermission")
+    fun showStalled(context: Context, sessionId: String, sessionTitle: String?, quietMinutes: Long?) {
+        val manager = context.getSystemService<NotificationManager>() ?: return
+        manager.notify(
+            stalledIdFor(sessionId),
+            NotificationCompat.Builder(context, Channels.ACTIVITY)
+                .setSmallIcon(R.drawable.ic_stat_ask)
+                .setContentTitle(sessionTitle ?: "A session")
+                .setContentText(
+                    "Stalled — nothing from it" +
+                        (quietMinutes?.let { " for $it min" } ?: " for a while") +
+                        ". Open it to stop it.",
+                )
+                .setContentIntent(openIntent(context, sessionId))
+                .setAutoCancel(true)
+                .build(),
+        )
+    }
+
+    fun cancelStalled(context: Context, sessionId: String) {
+        context.getSystemService<NotificationManager>()?.cancel(stalledIdFor(sessionId))
+    }
+
     fun cancel(context: Context, sessionId: String) {
         context.getSystemService<NotificationManager>()?.cancel(idFor(sessionId))
     }

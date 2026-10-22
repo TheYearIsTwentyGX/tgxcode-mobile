@@ -235,6 +235,7 @@ fun ConversationScreen(
 
     Column(modifier.fillMaxSize()) {
         PrChips(conversation.prs, onOpenUrl)
+        ChecklistBar(conversation.checklist, conversation.sessionId)
 
         LazyColumn(
             state = listState,
