@@ -55,6 +55,8 @@ import com.twentygx.tgxcode.data.model.SubagentResponse
 import com.twentygx.tgxcode.data.model.QueueReorderRequest
 import com.twentygx.tgxcode.data.model.QueueWriteResponse
 import com.twentygx.tgxcode.data.model.SendRequest
+import com.twentygx.tgxcode.data.model.RestartRequest
+import com.twentygx.tgxcode.data.model.RestartResponse
 import com.twentygx.tgxcode.data.model.SendResponse
 import com.twentygx.tgxcode.data.model.SessionDetail
 import com.twentygx.tgxcode.data.model.SessionPrsResponse
@@ -408,6 +410,18 @@ class BridgeApi(
         )
 
     /**
+     * Replace the session's process, keeping the conversation, so it starts with the
+     * tool list as it is now. `409` with `busy` while a turn or an ask is in flight;
+     * `409` with `background: n` when [force] is off and background tasks would stop.
+     */
+    suspend fun restart(sessionId: String, force: Boolean = false): ApiResult<RestartResponse> =
+        post(
+            "api/sessions/${sessionId.encoded()}/restart",
+            RestartRequest(force = force.takeIf { it }),
+            serializer(),
+        )
+
+    /**
      * Drop one queued message. `409` means it already went — including a `handed` one
      * the running turn read first — which is an outcome, not a failure.
      */
@@ -738,7 +752,7 @@ class BridgeApi(
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     Tgx.w("${response.request.method} ${response.request.url.encodedPath} -> ${response.code}")
-                    return@withContext ApiResult.Http(response.code, errorOf(text, response.code))
+                    return@withContext ApiResult.Http(response.code, errorOf(text, response.code), text)
                 }
                 ApiResult.Ok(AppJson.decodeFromString(deserializer, text))
             }

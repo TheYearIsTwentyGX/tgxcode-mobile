@@ -520,6 +520,7 @@ they now appear here, and where to find each one:
 | Long transcripts | "N earlier turns — load more"; the turn list in the top bar | `?turns=8` and `/range`, holding any result whose call is not loaded yet |
 | Subagents | "Open the subagent's transcript ›" on an Agent call | followed live with `subscribe {agent: {toolUseId, offset}}` |
 | Changes, diffs, scratchpad | the conversation's ⋮ menu | |
+| Restart process | the conversation's ⋮ menu, while the session has a live process | `POST /api/sessions/:id/restart`: replaces the `claude` process but keeps the conversation, so the session picks up new TGXCode tools. Refused while a turn or an ask is in flight; background tasks get a confirm, then a retry with `force` |
 | Send later | long-press Send | the mode is stored per message and never defaulted |
 | Snippets | chips above the composer; Settings → Snippets | `{{params}}`, the three insert modes and auto-submit, by `popover.js`'s rules |
 | Schedules | the calendar icon on the Tasks tab | only changed fields are PATCHed, so a `dontAsk` schedule can still be paused from here |

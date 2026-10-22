@@ -18,6 +18,7 @@ import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.Draft
 import com.twentygx.tgxcode.data.model.DraftBody
 import com.twentygx.tgxcode.data.model.FlagsRequest
+import com.twentygx.tgxcode.data.model.RestartOutcome
 import com.twentygx.tgxcode.data.model.SessionChoices
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.SessionSummary
@@ -133,6 +134,10 @@ class AppViewModel(
      * rather than in the screen for the same reason as [prSheet]: it outlives a
      * rotation, and the writes it starts are brokered here.
      */
+    /** A restart the bridge refused over background tasks, waiting on a yes. */
+    private val _restartConfirm = MutableStateFlow<RestartConfirm?>(null)
+    val restartConfirm: StateFlow<RestartConfirm?> = _restartConfirm.asStateFlow()
+
     private val _sessionSheet = MutableStateFlow<SessionSummary?>(null)
     val sessionSheet: StateFlow<SessionSummary?> = _sessionSheet.asStateFlow()
 
@@ -499,6 +504,22 @@ class AppViewModel(
         val stalled = repo.conversation.value
             ?.takeIf { it.sessionId == sessionId }?.runner?.stalled == true
         repo.stop(sessionId, hard = stalled)
+    }
+
+    /**
+     * Replace the session's process so it picks up new tools. Background tasks are the
+     * one refusal worth asking about: a yes retries with `force`, which stops them.
+     */
+    fun restartProcess(sessionId: String, force: Boolean = false) = viewModelScope.launch {
+        _restartConfirm.value = null
+        val outcome = repo.restart(sessionId, force)
+        if (outcome is RestartOutcome.Background && !force) {
+            _restartConfirm.value = RestartConfirm(sessionId, outcome.count)
+        }
+    }
+
+    fun dismissRestartConfirm() {
+        _restartConfirm.value = null
     }
 
     /**
@@ -1277,3 +1298,6 @@ data class BranchFrom(
             else -> "Branching from turn $turn of $total — the copy will not include turns $turn–$total."
         }
 }
+
+/** [count] background tasks would stop if [sessionId]'s process were restarted. */
+data class RestartConfirm(val sessionId: String, val count: Int)
