@@ -58,9 +58,24 @@ data class UserEvent(
     val text: String? = null,
     val images: List<JsonObject> = emptyList(),
     val command: SlashCommand? = null,
-    /** `human`, or the name of the agent that sent it. */
+    /**
+     * Claude Code's own `origin.kind`: `human`, `peer`, or an agent type. Not a closed
+     * set, so anything other than `human` reads as "not the person" rather than being
+     * switched on.
+     */
     val origin: String? = null,
+    /**
+     * The `parentUuid` of the turn's entry — what a `fromUuid` send branches from.
+     *
+     * Null on the first turn of a conversation, the one turn that cannot be branched
+     * from, and absent from a bridge older than branching. Both read as null here and
+     * both mean the same thing to a client: no branch offered.
+     */
+    val parent: String? = null,
 ) : TranscriptEvent() {
+
+    /** Whether this turn came from the person, rather than a peer or an agent. */
+    val fromHuman: Boolean get() = origin == null || origin == "human"
 
     /**
      * What to actually show.
@@ -156,7 +171,12 @@ data class ToolEvent(
     val persistedPath: String? = null,
     val durationMs: Long? = null,
 ) : TranscriptEvent() {
-    val isRunning: Boolean get() = status == null
+    /**
+     * `pending` while running, per `docs/api.md` — **not** absent, as it reads at first
+     * glance. Absent is kept as running too, for the call half of a live tail that has
+     * not been stamped yet.
+     */
+    val isRunning: Boolean get() = status == null || status == "pending"
     val isError: Boolean get() = status == "error"
 
     /** Fold in a result that arrived separately on a live tail. */
@@ -256,6 +276,40 @@ data class AgentDoneEvent(
     val toolUseId: String? = null,
     val status: String? = null,
     val summary: String? = null,
+    /**
+     * Whether there is a subagent transcript to open. A background shell reports
+     * through the same notification and its `toolUseId` names a `Bash` call, which has
+     * nothing to open — so only offer a way in when this is true.
+     */
+    val hasTranscript: Boolean = false,
+) : TranscriptEvent()
+
+/**
+ * Another session messaged this one over the peer socket. [fromName] is the peer's
+ * name, which is also its address.
+ */
+@Serializable
+@SerialName("peer-message")
+data class PeerMessageEvent(
+    override val id: String,
+    override val ts: String? = null,
+    val from: String? = null,
+    val fromName: String? = null,
+    val text: String? = null,
+) : TranscriptEvent()
+
+/** Work another session handed this one — which is what woke it. */
+@Serializable
+@SerialName("handoff")
+data class HandoffEvent(
+    override val id: String,
+    override val ts: String? = null,
+    val text: String? = null,
+    /** The sending session's id. */
+    val from: String? = null,
+    val fromTitle: String? = null,
+    val fromProject: String? = null,
+    val title: String? = null,
 ) : TranscriptEvent()
 
 @Serializable
