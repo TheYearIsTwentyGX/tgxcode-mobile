@@ -56,6 +56,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.twentygx.tgxcode.data.background.BackgroundIntents
+import com.twentygx.tgxcode.data.background.BackgroundRules
 import com.twentygx.tgxcode.data.repo.ConnState
 import com.twentygx.tgxcode.data.repo.NavCommand
 import com.twentygx.tgxcode.data.repo.appliesIn
@@ -125,6 +127,20 @@ fun TgxCodeRoot(
 ) {
     val nav = rememberNavController()
     val snackbar = remember { SnackbarHostState() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // The Settings card's buttons. Most open a system screen; coming back is a resume,
+    // which re-reads what they changed.
+    val onBackgroundFix: (BackgroundRules.Fix) -> Unit = { fix ->
+        when (fix) {
+            BackgroundRules.Fix.StayConnected -> onStayConnected(true)
+            BackgroundRules.Fix.Reconnect -> vm.background.reconnectNow()
+            BackgroundRules.Fix.BatteryExempt -> BackgroundIntents.openBatteryExemption(context)
+            BackgroundRules.Fix.InstallPermission -> vm.grantInstallPermission()
+            BackgroundRules.Fix.Notifications -> BackgroundIntents.openNotifications(context)
+            BackgroundRules.Fix.CheckNow -> vm.background.checkNow()
+        }
+    }
 
     val connection by vm.repo.connection.collectAsStateWithLifecycle()
     val health by vm.repo.health.collectAsStateWithLifecycle()
@@ -743,6 +759,7 @@ fun TgxCodeRoot(
                         )
                     }
                     composable<Settings> {
+                        val background by vm.background.status.collectAsStateWithLifecycle()
                         SettingsScreen(
                             state = settingsUi,
                             onPasteChanged = vm::onPaste,
@@ -758,17 +775,25 @@ fun TgxCodeRoot(
                             onGrantInstallPermission = vm::grantInstallPermission,
                             onOpenSnippets = { nav.navigate(Snippets) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },
                             onOpenInstalls = { nav.navigate(Installs) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },
+                            background = background,
+                            now = now,
+                            onBackgroundFix = onBackgroundFix,
+                            onAppDetails = { BackgroundIntents.openAppDetails(context) },
                         )
                     }
                     composable<Installs> {
                         val installs by vm.phoneInstalls.records.collectAsStateWithLifecycle()
                         val retrying by vm.retryingInstalls.collectAsStateWithLifecycle()
+                        val background by vm.background.status.collectAsStateWithLifecycle()
                         LaunchedEffect(Unit) { vm.refreshInstalls() }
                         InstallsScreen(
                             records = installs,
                             now = now,
                             retrying = retrying,
                             onRetry = vm::retryInstall,
+                            batteryExempt = background.batteryExempt,
+                            onAllowBattery = { BackgroundIntents.openBatteryExemption(context) },
+                            onAppDetails = { BackgroundIntents.openAppDetails(context) },
                         )
                     }
                 }
@@ -801,6 +826,30 @@ fun TgxCodeRoot(
             moving = null
             if (picked != null) vm.rescheduleMessage(message.id, picked.first)
         }
+    }
+
+    // Once, the first time an install arrives while Android may still freeze the app.
+    val batteryPrompt by vm.background.batteryPrompt.collectAsStateWithLifecycle()
+    if (batteryPrompt) {
+        AlertDialog(
+            onDismissRequest = vm.background::dismissBatteryPrompt,
+            title = { Text("Let installs run in the background?") },
+            text = {
+                Text(
+                    "Android is optimising TGXCode's battery use, so it can freeze the app and drop " +
+                        "its connection, and an app sent from the desktop then waits until you open " +
+                        "TGXCode. Allow it to run in the background to install straight away. On a " +
+                        "Motorola, also set App info → App battery usage → Allow background usage.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.background.dismissBatteryPrompt()
+                    BackgroundIntents.openBatteryExemption(context)
+                }) { Text("Allow") }
+            },
+            dismissButton = { TextButton(onClick = vm.background::dismissBatteryPrompt) { Text("Not now") } },
+        )
     }
 
     restartConfirm?.let { confirm ->

@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.getSystemService
 import com.twentygx.tgxcode.MainActivity
 import com.twentygx.tgxcode.R
+import com.twentygx.tgxcode.data.background.BackgroundIntents
 import com.twentygx.tgxcode.data.install.InstallWork
 import com.twentygx.tgxcode.data.model.PhoneInstallState
 
@@ -152,6 +153,45 @@ object InstallNotifications {
 
     fun cancelPermission(context: Context) {
         context.getSystemService<NotificationManager>()?.cancel(PERMISSION_ID)
+    }
+
+    private const val BATTERY_ID = 4997
+
+    /**
+     * The one-time ask for the battery exemption, when an install arrives with the app
+     * off screen. The tap is the system's own request dialog, so one tap there and one
+     * "Allow" is the whole fix.
+     */
+    @SuppressLint("MissingPermission")
+    fun showBatteryPrompt(context: Context) {
+        val manager = context.getSystemService<NotificationManager>() ?: return
+        val tap = PendingIntent.getActivity(
+            context,
+            BATTERY_ID,
+            BackgroundIntents.batteryExemption(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val text = "Android is optimising TGXCode's battery use, so it can freeze the app and drop " +
+            "its connection, and installs then wait until you open it. Tap to let it run in the " +
+            "background. On a Motorola, also set App info → App battery usage → Allow background usage."
+        manager.notify(
+            BATTERY_ID,
+            NotificationCompat.Builder(context, Channels.INSTALLS)
+                .setSmallIcon(R.drawable.ic_stat_ask)
+                .setContentTitle("Let installs run in the background")
+                .setContentText("Tap to stop Android freezing TGXCode")
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(tap)
+                .addAction(0, "App info", PendingIntent.getActivity(
+                    context,
+                    BATTERY_ID + 1,
+                    BackgroundIntents.appDetails(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ))
+                .setAutoCancel(true)
+                .build(),
+        )
     }
 
     @SuppressLint("MissingPermission")

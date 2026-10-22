@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -11,6 +12,13 @@
     <!-- Held for the length of one install, so a download goes on with the screen off. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!--
+      Lets the app show the system's one-tap "let it run in the background?" dialog. The
+      exemption is what keeps the connection, and permits starting a foreground service
+      from the background, on a phone that otherwise freezes it. Play restricts this
+      permission to a few kinds of app; it does not apply to a sideloaded one.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!--
       Phone installs: APKs the desktop queues for this phone. REQUEST_INSTALL_PACKAGES
@@ -143,6 +151,20 @@
         <receiver
             android:name=".service.InstallResultReceiver"
             android:exported="false" />
+
+        <!-- The pulse alarm: wakes a sleeping phone to check the stream. See BackgroundHealth. -->
+        <receiver
+            android:name=".service.PulseReceiver"
+            android:exported="false" />
+
+        <!--
+          WorkManager runs expedited work as a foreground service below API 31, and the
+          install check's is a download. Declared so the type is allowed.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <receiver
             android:name=".service.BootReceiver"

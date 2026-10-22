@@ -1,8 +1,15 @@
 package com.twentygx.tgxcode.data.net
 
+import android.os.SystemClock
 import okhttp3.Interceptor
+import okhttp3.MediaType
 import okhttp3.OkHttpClient
 import okhttp3.Response
+import okhttp3.ResponseBody
+import okio.Buffer
+import okio.BufferedSource
+import okio.ForwardingSource
+import okio.buffer
 import java.util.concurrent.TimeUnit
 
 /**
@@ -83,6 +90,8 @@ private class AccessInterceptor(
 class BridgeClients(
     tokenProvider: () -> String?,
     accessProvider: () -> Pair<String, String>? = { null },
+    /** When the stream last delivered a byte, `: ping` included. */
+    val streamPulse: StreamPulse = StreamPulse(),
 ) {
 
     private val base: OkHttpClient = OkHttpClient.Builder()
@@ -136,6 +145,7 @@ class BridgeClients(
     val stream: OkHttpClient = base.newBuilder()
         .readTimeout(40, TimeUnit.SECONDS)
         .callTimeout(0, TimeUnit.MILLISECONDS)
+        .addInterceptor(PulseInterceptor(streamPulse))
         .build()
 
     /**
@@ -203,5 +213,47 @@ class BridgeClients(
      */
     fun evictPooledConnections() {
         base.connectionPool.evictAll()
+    }
+}
+
+/**
+ * The stream's last sign of life, on `elapsedRealtime`.
+ *
+ * `okhttp-sse` swallows the bridge's `: ping` comments without a callback, so a quiet
+ * stream and a dead one look the same from the listener. Bytes do not: every ping is a
+ * read on the socket. And unlike the read timeout, whose timer stops while the phone
+ * sleeps, `elapsedRealtime` counts the sleep, so a dead socket shows as stale the
+ * moment anything wakes the phone. See `BackgroundRules.streamStale`.
+ */
+class StreamPulse(private val clock: () -> Long = SystemClock::elapsedRealtime) {
+    @Volatile
+    var lastByteAt: Long = 0L
+        private set
+
+    fun beat() {
+        lastByteAt = clock()
+    }
+}
+
+/** Counts the stream's bytes as they are read, without touching them. */
+private class PulseInterceptor(private val pulse: StreamPulse) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        pulse.beat()
+        val body = response.body
+        val counted = object : ForwardingSource(body.source()) {
+            override fun read(sink: Buffer, byteCount: Long): Long =
+                super.read(sink, byteCount).also { if (it > 0) pulse.beat() }
+        }.buffer()
+        return response.newBuilder()
+            .body(
+                object : ResponseBody() {
+                    override fun contentType(): MediaType? = body.contentType()
+                    override fun contentLength(): Long = body.contentLength()
+                    override fun source(): BufferedSource = counted
+                    override fun close() = body.close()
+                },
+            )
+            .build()
     }
 }

@@ -17,6 +17,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.twentygx.tgxcode.ui.AppViewModel
 import com.twentygx.tgxcode.ui.TgxCodeRoot
 import com.twentygx.tgxcode.ui.theme.TgxCodeTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -84,15 +85,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // On screen is the one moment Android always allows a foreground service to start.
+    // If *Stay connected* is on and its service died in the background, bring it back
+    // now, rather than leaving it dead until the next reboot.
+    override fun onStart() {
+        super.onStart()
+        val container = (application as TgxApp).container
+        container.appScope.launch { container.background.ensureService("app opened") }
+    }
+
     // Coming back from the "Install unknown apps" screen is a resume, and is the moment
-    // a phone install waiting on that grant can carry on.
+    // a phone install waiting on that grant can carry on. Likewise the battery and
+    // notification screens, for the Settings card.
     override fun onResume() {
         super.onResume()
         (application as TgxApp).container.phoneInstalls.onResume()
+        (application as TgxApp).container.background.onResume()
     }
 
     override fun onPause() {
         (application as TgxApp).container.phoneInstalls.onPause()
+        (application as TgxApp).container.background.onPause()
         super.onPause()
     }
 

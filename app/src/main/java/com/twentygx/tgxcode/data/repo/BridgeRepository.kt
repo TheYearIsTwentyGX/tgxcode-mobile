@@ -6,6 +6,7 @@ import com.twentygx.tgxcode.core.getOrNull
 import com.twentygx.tgxcode.core.isAccessDenied
 import com.twentygx.tgxcode.core.isUnauthorized
 import com.twentygx.tgxcode.core.message
+import com.twentygx.tgxcode.data.background.BackgroundRules
 import com.twentygx.tgxcode.data.model.AttachmentRef
 import com.twentygx.tgxcode.data.model.AgentFollow
 import com.twentygx.tgxcode.data.model.Ask
@@ -51,7 +52,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
-import kotlin.random.Random
 
 /**
  * How the open-task badge should move when one task changes status.
@@ -588,21 +588,10 @@ class BridgeRepository(
                 // alone would climb to the 30s ceiling on every network blip while the
                 // socket is the only thing keeping asks answerable. Opening it at all
                 // is the success worth resetting on there.
-                attempt = if (sawHello || (buffered && sawOpen)) 0 else attempt + 1
-                delay(backoffMillis(attempt))
+                attempt = BackgroundRules.nextAttempt(attempt, sawHello, buffered, sawOpen)
+                delay(BackgroundRules.backoffMillis(attempt))
             }
         }
-    }
-
-    /**
-     * Aggressive rather than polite, because every second disconnected is a second
-     * in which an arriving ask is auto-denied. Full jitter so several clients do not
-     * synchronise on a bridge restart.
-     */
-    private fun backoffMillis(attempt: Int): Long {
-        if (attempt <= 0) return 0
-        val base = minOf(30_000L, 250L * (1L shl minOf(attempt, 7)))
-        return base / 2 + Random.nextLong(base / 2 + 1)
     }
 
     // ------------------------------------------------------------- polling

@@ -13,6 +13,7 @@ import com.twentygx.tgxcode.core.Tgx
 import com.twentygx.tgxcode.core.getOrNull
 import com.twentygx.tgxcode.core.isConflict
 import com.twentygx.tgxcode.core.message
+import com.twentygx.tgxcode.data.background.BackgroundRules
 import com.twentygx.tgxcode.data.model.PhoneInstall
 import com.twentygx.tgxcode.data.model.PhoneInstallProgress
 import com.twentygx.tgxcode.data.model.PhoneInstallState
@@ -24,6 +25,7 @@ import com.twentygx.tgxcode.data.repo.BridgeRepository
 import com.twentygx.tgxcode.data.settings.SettingsStore
 import com.twentygx.tgxcode.service.InstallNotifications
 import com.twentygx.tgxcode.service.InstallResultReceiver
+import com.twentygx.tgxcode.service.InstallCheckWorker
 import com.twentygx.tgxcode.service.InstallService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -45,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -248,8 +251,11 @@ class PhoneInstaller(
      * — and so is a record this phone claimed and then lost hold of.
      */
     private suspend fun catchUp() {
+        catchUp(api.phoneInstalls().getOrNull()?.installs ?: return)
+    }
+
+    private suspend fun catchUp(installs: List<PhoneInstall>) {
         catchingUp.withLock {
-            val installs = api.phoneInstalls().getOrNull()?.installs ?: return
             _records.value = installs
             // What the poll says about work in hand, for when the stream is not
             // carrying events.
@@ -266,6 +272,28 @@ class PhoneInstaller(
                 .toSet()
             PhoneInstallRules.toPickUp(installs, own, inHand).forEach { enqueue(it, claimed = false) }
         }
+    }
+
+    /**
+     * The fallback job's read, which works with no stream at all: what is waiting for
+     * this phone, and the same catch-up the stream's reconnect does, from one read.
+     */
+    suspend fun backgroundCheck(): BackgroundRules.Fallback {
+        // A process started for the job has not loaded the config from disk yet.
+        if (withTimeoutOrNull(CONFIG_WAIT_MILLIS) { config.filterNotNull().first() } == null) {
+            return BackgroundRules.Fallback.Unreachable
+        }
+        val installs = api.phoneInstalls().getOrNull()?.installs
+        val inHand = synchronized(activeLock) { active.keys.toSet() }
+        val decision = BackgroundRules.fallback(
+            installs,
+            settings.installClaims(),
+            settings.installApps.first(),
+            pm.canRequestPackageInstalls(),
+            inHand,
+        )
+        if (installs != null) catchUp(installs)
+        return decision
     }
 
     /** The Installs screen, on open and on pull: read the queue now. */
@@ -316,7 +344,9 @@ class PhoneInstaller(
             _busy.value = busy
             rising
         }
-        if (rising) InstallService.start(context)
+        // Refused from the background without an exemption: a job keeps the process
+        // instead, which is allowed.
+        if (rising && !InstallService.start(context)) InstallCheckWorker.hold(context)
     }
 
     // ------------------------------------------------------------- the work
@@ -777,6 +807,9 @@ class PhoneInstaller(
 
     companion object {
         private val IN_FLIGHT = setOf(PhoneInstallState.INSTALLING, PhoneInstallState.NEEDS_ACTION)
+
+        /** How long a freshly started process may take to read its config. */
+        private const val CONFIG_WAIT_MILLIS = 5_000L
 
         /** Tries per install before `failed`: the first, and two more. */
         private const val ATTEMPTS = 3
