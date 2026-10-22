@@ -178,7 +178,7 @@ class PollingFallbackTest {
         server.start()
 
         val config = BridgeConfig(server.url("/"), "t".repeat(43))
-        val clients = BridgeClients { config.token }
+        val clients = BridgeClients({ config.token })
         val repo = BridgeRepository(
             api = BridgeApi(clients) { config },
             sse = BridgeSse(clients) { config },

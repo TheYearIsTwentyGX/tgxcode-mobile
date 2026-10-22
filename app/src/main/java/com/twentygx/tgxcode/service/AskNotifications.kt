@@ -38,7 +38,11 @@ object AskNotifications {
     fun idFor(sessionId: String): Int = ASK_ID_BASE + sessionId.hashCode().and(0xFFFF)
 
     @SuppressLint("MissingPermission")
-    fun show(context: Context, ask: Ask, sessionTitle: String?) {
+    /**
+     * @param quiet a worker's ask its orchestrator is handling: posted without sound or
+     *   heads-up, still answerable, and said aloud later if it gets stuck.
+     */
+    fun show(context: Context, ask: Ask, sessionTitle: String?, quiet: Boolean = false) {
         val sessionId = ask.sessionId ?: return
         val manager = context.getSystemService<NotificationManager>() ?: return
 
@@ -52,6 +56,7 @@ object AskNotifications {
                     else -> "${ask.toolLabel} needs permission"
                 },
             )
+            if (quiet) append(" (its orchestrator has it)")
         }
 
         val builder = NotificationCompat.Builder(context, Channels.ASKS)
@@ -59,7 +64,8 @@ object AskNotifications {
             .setContentTitle(title)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body(ask)))
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(if (quiet) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+            .setSilent(quiet)
             // Not auto-cancel: if you tap in, read it, and back out without
             // answering, the ask is still blocked and the notification should still
             // be there. Mirrors `requireInteraction: true` on the desktop.

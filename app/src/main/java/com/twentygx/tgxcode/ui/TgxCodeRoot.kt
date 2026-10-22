@@ -57,6 +57,7 @@ import androidx.navigation.toRoute
 import com.twentygx.tgxcode.data.repo.ConnState
 import com.twentygx.tgxcode.data.repo.NavCommand
 import com.twentygx.tgxcode.data.repo.appliesIn
+import com.twentygx.tgxcode.data.repo.isRefused
 import com.twentygx.tgxcode.ui.common.ConnectionDot
 import com.twentygx.tgxcode.ui.common.DegradedBanner
 import com.twentygx.tgxcode.ui.common.RemoteBanner
@@ -68,6 +69,15 @@ import com.twentygx.tgxcode.ui.conversation.ScheduleSendDialog
 import com.twentygx.tgxcode.ui.conversation.SubagentScreen
 import com.twentygx.tgxcode.ui.conversation.UserTurnActions
 import com.twentygx.tgxcode.ui.newsession.NewSessionScreen
+import com.twentygx.tgxcode.ui.orchestrator.OrchestratorActions
+import com.twentygx.tgxcode.ui.orchestrator.OrchestratorPickerSheet
+import com.twentygx.tgxcode.ui.orchestrator.OrchestratorScreen
+import com.twentygx.tgxcode.ui.orchestrator.OrchestratorSettingsSheet
+import com.twentygx.tgxcode.ui.orchestrator.OrchestratorTabs
+import com.twentygx.tgxcode.ui.orchestrator.WorkerBanner
+import com.twentygx.tgxcode.ui.orchestrator.needsCount
+import com.twentygx.tgxcode.ui.orchestrator.needsYou
+import com.twentygx.tgxcode.data.model.Draft
 import com.twentygx.tgxcode.ui.newsession.recentDirs
 import com.twentygx.tgxcode.ui.sessions.PrSheet
 import com.twentygx.tgxcode.ui.sessions.SessionActionsSheet
@@ -75,6 +85,7 @@ import com.twentygx.tgxcode.ui.sessions.SessionSheetActions
 import com.twentygx.tgxcode.ui.sessions.SessionsScreen
 import com.twentygx.tgxcode.ui.tasks.TaskActions
 import com.twentygx.tgxcode.ui.tasks.TasksScreen
+import com.twentygx.tgxcode.ui.settings.AccessDeniedScreen
 import com.twentygx.tgxcode.ui.settings.NotPairedScreen
 import com.twentygx.tgxcode.ui.settings.SettingsScreen
 import com.twentygx.tgxcode.ui.schedules.SchedulesScreen
@@ -146,6 +157,11 @@ fun TgxCodeRoot(
     var laterOpen by rememberSaveable { mutableStateOf(false) }
     var moving by remember { mutableStateOf<com.twentygx.tgxcode.data.model.LaterMessage?>(null) }
     var overflowOpen by remember { mutableStateOf(false) }
+    val orchPayloads by vm.orchestrators.payloads.collectAsStateWithLifecycle()
+    val orchList by vm.orchestrators.orchestrators.collectAsStateWithLifecycle()
+    val orchBusy by vm.orchestrators.busy.collectAsStateWithLifecycle()
+    var orchSettingsFor by rememberSaveable { mutableStateOf<String?>(null) }
+    var picking by remember { mutableStateOf<PickTarget?>(null) }
 
     var filter by rememberSaveable { mutableStateOf("") }
     var showArchived by rememberSaveable { mutableStateOf(false) }
@@ -320,6 +336,21 @@ fun TgxCodeRoot(
                                             text = { Text("Scheduled messages") },
                                             onClick = { overflowOpen = false; laterOpen = true },
                                         )
+                                        val open = conversation
+                                        val orchOn = open != null &&
+                                            (orchPayloads[open.sessionId]?.enabled ?: (open.summary.orchestrator != null))
+                                        if (open != null && orchOn) {
+                                            DropdownMenuItem(
+                                                text = { Text("Orchestrator settings") },
+                                                onClick = { overflowOpen = false; orchSettingsFor = open.sessionId },
+                                            )
+                                        } else if (open != null && open.summary.worker == null) {
+                                            // A worker cannot be one: orchestrators only go one level deep.
+                                            DropdownMenuItem(
+                                                text = { Text("Make it an orchestrator") },
+                                                onClick = { overflowOpen = false; vm.makeOrchestrator(open.sessionId) },
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -397,6 +428,10 @@ fun TgxCodeRoot(
                     NotPairedScreen(onOpenSettings = { nav.navigate(Settings) })
                     return@Box
                 }
+                if (connection == ConnState.AccessDenied && !onSettings) {
+                    AccessDeniedScreen(onOpenSettings = { nav.navigate(Settings) })
+                    return@Box
+                }
 
                 NavHost(navController = nav, startDestination = Sessions) {
                     composable<Sessions> {
@@ -470,6 +505,14 @@ fun TgxCodeRoot(
                             },
                             onDeleteDraft = vm::deleteDraft,
                             onClearDraftEdit = vm::clearDraftEdit,
+                            orchestrator = newSession.orchestrator,
+                            onOrchestratorChanged = vm::setNewOrchestrator,
+                            // Offered only when there is somewhere to send it — the list,
+                            // not the session rows, is the answer to that.
+                            onSendToOrchestrator = { picking = PickTarget.Form(newSession.prompt) }
+                                .takeIf { !orchList.isNullOrEmpty() },
+                            onSendDraftToOrchestrator = { d: Draft -> picking = PickTarget.FromDraft(d) }
+                                .takeIf { !orchList.isNullOrEmpty() },
                         )
                     }
                     composable<Conversation> { backStackEntry ->
@@ -477,71 +520,140 @@ fun TgxCodeRoot(
                         LaunchedEffect(route.sessionId) { vm.open(route.sessionId) }
                         val mode = vm.modeFor(route.sessionId)
                         val sessionId = route.sessionId
-                        ConversationScreen(
-                            conversation = conversation?.takeIf { it.sessionId == route.sessionId },
-                            expandedTools = vm.expandedTools,
-                            onToggleTool = vm::toggleTool,
-                            draft = draft,
-                            onDraftChanged = vm::setDraft,
-                            mode = mode,
-                            modes = health?.offeredModes().orEmpty(),
-                            onModeChanged = { vm.setMode(route.sessionId, it) },
-                            sending = sending,
-                            answering = answering.isNotEmpty(),
-                            nowMillis = now,
-                            onSend = {
-                                vm.send(sessionId, mode) { id ->
-                                    nav.navigate(Conversation(id)) {
-                                        popUpTo(Conversation(sessionId)) { inclusive = true }
-                                    }
-                                }
-                            },
-                            onStop = { vm.stop(route.sessionId) },
-                            onAnswer = { body -> vm.answer(route.sessionId, body) },
-                            onLoadAll = vm::loadAll,
-                            onOpenUrl = openUrl,
-                            starting = opening == route.sessionId,
-                            suggestionActions = taskActions,
-                            acting = acting,
-                            controls = ComposerControls(
-                                model = vm.modelFor(sessionId),
-                                onModelChanged = { vm.setModel(sessionId, it) },
-                                effort = vm.effortFor(sessionId),
-                                onEffortChanged = { vm.setEffort(sessionId, it) },
-                                branchBanner = branch?.takeIf { it.sessionId == sessionId }?.banner,
-                                onCancelBranch = vm::cancelBranch,
-                                snippets = remember(snippets, conversation?.summary?.cwd) {
-                                    val cwd = conversation?.summary?.cwd
-                                    snippets.snippets.filter { it.appliesIn(cwd) }
-                                },
-                                snippetGroups = snippets.groups,
-                                onSendCanned = { text, snippetMode -> vm.sendCanned(sessionId, text, snippetMode) },
-                                slashCommands = slash,
-                                onWantSlashCommands = { vm.loadSlashCommands(sessionId) },
-                                onScheduleSend = { at, chosen -> vm.scheduleSend(sessionId, at, chosen) },
-                                attachments = staged,
-                                onAttach = { uris -> vm.attach(sessionId, uris) },
-                                onRemoveAttachment = vm::unstage,
-                                onRetryAttachment = { vm.retryStaged(sessionId, it) },
-                            ),
-                            userActions = remember(sessionId) {
-                                UserTurnActions(
-                                    onEditResend = vm::editAndResend,
-                                    onEditBranch = { vm.editAndBranch(sessionId, it) },
+                        // Every conversation asks whether it is an orchestrator: the row's
+                        // field can lag a role turned on elsewhere, and the answer is small.
+                        androidx.compose.runtime.DisposableEffect(sessionId) {
+                            vm.orchestrators.watch(sessionId)
+                            onDispose { vm.orchestrators.unwatch(sessionId) }
+                        }
+                        val shown = conversation?.takeIf { it.sessionId == sessionId }
+                        val summary = shown?.summary ?: sessions.firstOrNull { it.sessionId == sessionId }
+                        val orchPayload = orchPayloads[sessionId]
+                        val isOrch = orchPayload?.enabled ?: (summary?.orchestrator != null)
+                        // A worker's banner says where it came from, which only its
+                        // orchestrator's payload knows.
+                        val hostId = summary?.worker?.orchestratorId
+                        LaunchedEffect(hostId) { hostId?.let { vm.orchestrators.load(it) } }
+                        // The overview is what an orchestrator opens on, as on the desktop.
+                        var overview by rememberSaveable(sessionId) { mutableStateOf(true) }
+                        Column(Modifier.fillMaxSize()) {
+                            if (isOrch) {
+                                val needs = orchPayload?.let {
+                                    needsCount(
+                                        needsYou(it, shown?.runner?.state, shown?.ask, now),
+                                    )
+                                } ?: 0
+                                OrchestratorTabs(
+                                    overview = overview,
+                                    needs = needs,
+                                    onOverview = { overview = it },
                                 )
-                            },
-                            onDropQueued = { vm.dropQueued(sessionId, it) },
-                            onMoveQueued = { id, by -> vm.moveQueued(sessionId, id, by) },
-                            onLoadEarlier = vm::loadEarlier,
-                            onOpenAgent = { toolUseId, title ->
-                                vm.openAgent(sessionId, toolUseId, title)
-                                nav.navigate(Subagent(sessionId, toolUseId))
-                            },
-                            turnsOpen = turnsOpen,
-                            onTurnsOpenChanged = { turnsOpen = it },
-                            later = later.filter { it.sessionId == sessionId },
-                            onOpenLater = { laterOpen = true },
-                        )
+                            }
+                            summary?.worker?.takeIf { !isOrch }?.let { worker ->
+                                val host = sessions.firstOrNull { it.sessionId == worker.orchestratorId }
+                                // A worker whose orchestrator is gone is drawn as an ordinary session.
+                                if (host != null || orchPayloads[worker.orchestratorId]?.enabled == true) {
+                                    WorkerBanner(
+                                        orchestratorTitle = host?.displayTitle,
+                                        origin = orchPayloads[worker.orchestratorId]?.workers
+                                            ?.firstOrNull { it.id == sessionId }?.origin,
+                                        closed = worker.closed,
+                                        onOpenOrchestrator = { nav.navigate(Conversation(worker.orchestratorId)) },
+                                    )
+                                }
+                            }
+                            if (isOrch && overview) {
+                                OrchestratorScreen(
+                                    payload = orchPayload,
+                                    orchState = shown?.runner?.state,
+                                    orchAsk = shown?.ask,
+                                    sessions = sessions,
+                                    prs = prs,
+                                    quota = quota?.windows.orEmpty(),
+                                    busy = orchBusy,
+                                    nowMillis = now,
+                                    actions = remember(sessionId) {
+                                        OrchestratorActions(
+                                            onOpenSession = { nav.navigate(Conversation(it)) },
+                                            onShowConversation = { overview = false },
+                                            onOpenSettings = { orchSettingsFor = sessionId },
+                                            onResume = { vm.resumeOrchestrator(sessionId) },
+                                            onAnswerDecision = { d, text -> vm.answerDecision(sessionId, d, text) },
+                                            onDismiss = { vm.dismissInboxItem(sessionId, it) },
+                                            onWithdraw = { vm.withdrawTask(sessionId, it) },
+                                            onAnswerWorker = { workerId, body -> vm.answer(workerId, body) },
+                                            onOpenUrl = openUrl,
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            } else ConversationScreen(
+                                modifier = Modifier.weight(1f),
+                                conversation = conversation?.takeIf { it.sessionId == route.sessionId },
+                                expandedTools = vm.expandedTools,
+                                onToggleTool = vm::toggleTool,
+                                draft = draft,
+                                onDraftChanged = vm::setDraft,
+                                mode = mode,
+                                modes = health?.offeredModes().orEmpty(),
+                                onModeChanged = { vm.setMode(route.sessionId, it) },
+                                sending = sending,
+                                answering = answering.isNotEmpty(),
+                                nowMillis = now,
+                                onSend = {
+                                    vm.send(sessionId, mode) { id ->
+                                        nav.navigate(Conversation(id)) {
+                                            popUpTo(Conversation(sessionId)) { inclusive = true }
+                                        }
+                                    }
+                                },
+                                onStop = { vm.stop(route.sessionId) },
+                                onAnswer = { body -> vm.answer(route.sessionId, body) },
+                                onLoadAll = vm::loadAll,
+                                onOpenUrl = openUrl,
+                                starting = opening == route.sessionId,
+                                suggestionActions = taskActions,
+                                acting = acting,
+                                controls = ComposerControls(
+                                    model = vm.modelFor(sessionId),
+                                    onModelChanged = { vm.setModel(sessionId, it) },
+                                    effort = vm.effortFor(sessionId),
+                                    onEffortChanged = { vm.setEffort(sessionId, it) },
+                                    branchBanner = branch?.takeIf { it.sessionId == sessionId }?.banner,
+                                    onCancelBranch = vm::cancelBranch,
+                                    snippets = remember(snippets, conversation?.summary?.cwd) {
+                                        val cwd = conversation?.summary?.cwd
+                                        snippets.snippets.filter { it.appliesIn(cwd) }
+                                    },
+                                    snippetGroups = snippets.groups,
+                                    onSendCanned = { text, snippetMode -> vm.sendCanned(sessionId, text, snippetMode) },
+                                    slashCommands = slash,
+                                    onWantSlashCommands = { vm.loadSlashCommands(sessionId) },
+                                    onScheduleSend = { at, chosen -> vm.scheduleSend(sessionId, at, chosen) },
+                                    attachments = staged,
+                                    onAttach = { uris -> vm.attach(sessionId, uris) },
+                                    onRemoveAttachment = vm::unstage,
+                                    onRetryAttachment = { vm.retryStaged(sessionId, it) },
+                                ),
+                                userActions = remember(sessionId) {
+                                    UserTurnActions(
+                                        onEditResend = vm::editAndResend,
+                                        onEditBranch = { vm.editAndBranch(sessionId, it) },
+                                    )
+                                },
+                                onDropQueued = { vm.dropQueued(sessionId, it) },
+                                onMoveQueued = { id, by -> vm.moveQueued(sessionId, id, by) },
+                                onLoadEarlier = vm::loadEarlier,
+                                onOpenAgent = { toolUseId, title ->
+                                    vm.openAgent(sessionId, toolUseId, title)
+                                    nav.navigate(Subagent(sessionId, toolUseId))
+                                },
+                                turnsOpen = turnsOpen,
+                                onTurnsOpenChanged = { turnsOpen = it },
+                                later = later.filter { it.sessionId == sessionId },
+                                onOpenLater = { laterOpen = true },
+                            )
+                        }
                     }
                     composable<Subagent> { backStackEntry ->
                         val route = backStackEntry.toRoute<Subagent>()
@@ -610,11 +722,13 @@ fun TgxCodeRoot(
                             onPasteChanged = vm::onPaste,
                             onOriginChanged = vm::onOrigin,
                             onTokenChanged = vm::onToken,
+                            onAccessIdChanged = vm::onAccessId,
+                            onAccessSecretChanged = vm::onAccessSecret,
                             onTest = vm::test,
                             onSave = vm::save,
                             onForget = vm::forget,
                             onStayConnectedChanged = onStayConnected,
-                            onOpenSnippets = { nav.navigate(Snippets) }.takeIf { connection != ConnState.NotPaired && connection != ConnState.Unconfigured },
+                            onOpenSnippets = { nav.navigate(Snippets) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },
                         )
                     }
                 }
@@ -649,6 +763,44 @@ fun TgxCodeRoot(
         }
     }
 
+    orchSettingsFor?.let { id ->
+        val payload = orchPayloads[id]
+        // Turned off, here or elsewhere: there is nothing left to set.
+        LaunchedEffect(payload?.enabled) { if (payload?.enabled == false) orchSettingsFor = null }
+        if (payload != null && payload.enabled) {
+            OrchestratorSettingsSheet(
+                settings = payload.settings,
+                paused = payload.paused != null,
+                nowMillis = now,
+                onSave = { vm.saveOrchestratorSettings(id, it) },
+                onResume = { vm.resumeOrchestrator(id) },
+                onTurnOff = { orchSettingsFor = null; vm.stopOrchestrating(id) },
+                onDismiss = { orchSettingsFor = null },
+            )
+        }
+    }
+
+    picking?.let { target ->
+        // Asked fresh on every open, as the desktop's picker does: which orchestrators
+        // are live, paused or busy is exactly what moves while you are not looking.
+        LaunchedEffect(target) { vm.orchestrators.loadList() }
+        OrchestratorPickerSheet(
+            subject = when (target) {
+                is PickTarget.FromDraft -> target.draft.displayTitle
+                is PickTarget.Form -> target.prompt.lineSequence().firstOrNull { it.isNotBlank() }
+            },
+            rows = orchList,
+            onPick = { row ->
+                picking = null
+                when (target) {
+                    is PickTarget.FromDraft -> vm.sendDraftToOrchestrator(row.orchestratorId, target.draft)
+                    is PickTarget.Form -> vm.sendFormToOrchestrator(row.orchestratorId)
+                }
+            },
+            onDismiss = { picking = null },
+        )
+    }
+
     if (quotaOpen) {
         QuotaSheet(
             quota = quota,
@@ -676,6 +828,12 @@ fun TgxCodeRoot(
 }
 
 private fun NavCommand.Follow.from(): String = sessionId
+
+/** What the Send-to-orchestrator picker is handing over. */
+private sealed interface PickTarget {
+    data class FromDraft(val draft: Draft) : PickTarget
+    data class Form(val prompt: String) : PickTarget
+}
 
 /** Tab switching keeps each tab's scroll position and filter, which the web loses. */
 private fun androidx.navigation.NavHostController.navigateTab(route: Any) {

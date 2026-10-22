@@ -8,6 +8,7 @@ import com.twentygx.tgxcode.data.net.BridgeClients
 import com.twentygx.tgxcode.data.net.BridgeConfig
 import com.twentygx.tgxcode.data.net.BridgeSse
 import com.twentygx.tgxcode.data.repo.BridgeRepository
+import com.twentygx.tgxcode.data.repo.OrchestratorStore
 import com.twentygx.tgxcode.data.repo.StatusStore
 import com.twentygx.tgxcode.data.repo.WorkspaceStore
 import com.twentygx.tgxcode.data.settings.SettingsStore
@@ -40,7 +41,10 @@ class AppContainer(context: Context) {
     val stayConnected: StateFlow<Boolean> =
         settings.stayConnected.stateIn(appScope, SharingStarted.Eagerly, false)
 
-    private val clients = BridgeClients(tokenProvider = { config.value?.token })
+    private val clients = BridgeClients(
+        tokenProvider = { config.value?.token },
+        accessProvider = { config.value?.access },
+    )
 
     val api = BridgeApi(clients, configProvider = { config.value })
 
@@ -53,6 +57,9 @@ class AppContainer(context: Context) {
 
     /** Scheduled messages, snippets and schedules — whole payloads, pushed. */
     val workspace = WorkspaceStore(api, repository, appScope)
+
+    /** Orchestrators: each one's payload, and the list a task can be handed to. */
+    val orchestrators = OrchestratorStore(api, repository, appScope)
 
     /** Reads picked files off the phone. */
     val attachmentSource = AttachmentSource(appContext)

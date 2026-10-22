@@ -170,6 +170,8 @@ data class CreateSessionRequest(
     val test: Boolean = false,
     /** Uploaded through `POST /api/attachments?cwd=` first; [prompt] may then be empty. */
     val attachments: List<AttachmentRef>? = null,
+    /** Start it as an orchestrator, with its tools from the first turn. Absent is false. */
+    val orchestrator: Boolean? = null,
 )
 
 /**
@@ -184,6 +186,7 @@ data class CreateSessionResponse(
     val sessionId: String,
     val status: RunnerStatus? = null,
     val test: Boolean = false,
+    val orchestrator: Boolean = false,
 )
 
 /**

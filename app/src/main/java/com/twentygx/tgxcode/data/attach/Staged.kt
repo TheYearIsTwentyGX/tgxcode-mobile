@@ -83,6 +83,7 @@ class Uploader(private val source: AttachmentSource, private val api: BridgeApi)
             is ApiResult.Ok -> StageState.Ready(result.value.ref())
             is ApiResult.Http -> StageState.Failed(uploadRefusal(result))
             is ApiResult.Offline -> StageState.Failed(result.message())
+            is ApiResult.AccessDenied -> StageState.Failed(result.message())
         }
     }
 }

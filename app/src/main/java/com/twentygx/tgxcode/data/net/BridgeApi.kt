@@ -35,6 +35,15 @@ import com.twentygx.tgxcode.data.model.NotificationsResponse
 import com.twentygx.tgxcode.data.model.Quota
 import com.twentygx.tgxcode.data.model.QuotaRefreshResponse
 import com.twentygx.tgxcode.data.model.TaskList
+import com.twentygx.tgxcode.data.model.DecisionAnswered
+import com.twentygx.tgxcode.data.model.DecisionAnsweredResponse
+import com.twentygx.tgxcode.data.model.InboxDismissed
+import com.twentygx.tgxcode.data.model.OrchestratorPayload
+import com.twentygx.tgxcode.data.model.OrchestratorPut
+import com.twentygx.tgxcode.data.model.OrchestratorsResponse
+import com.twentygx.tgxcode.data.model.TaskFiled
+import com.twentygx.tgxcode.data.model.TaskFiling
+import com.twentygx.tgxcode.data.model.TaskWithdrawn
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.data.model.Prefs
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
@@ -479,6 +488,67 @@ class BridgeApi(
     suspend fun startDraft(id: String): ApiResult<CreateSessionResponse> =
         post("api/drafts/${id.encoded()}/start", JsonObject(emptyMap()), serializer())
 
+    // ------------------------------------------------------------ orchestrators
+
+    /**
+     * Every orchestrator a task can go to, live ones first. Also *the* answer to "is
+     * there one to send to" — the session list's `orchestrator` field is not, as it
+     * includes the archived ones a task should not go to.
+     */
+    suspend fun orchestrators(): ApiResult<OrchestratorsResponse> =
+        get("api/orchestrators", serializer())
+
+    /** Never a 404: a session that is not one answers `enabled: false`. */
+    suspend fun orchestrator(sessionId: String): ApiResult<OrchestratorPayload> =
+        get("api/sessions/${sessionId.encoded()}/orchestrator", serializer())
+
+    /**
+     * Turn the role on or off, or change settings — which merge field by field, a bad
+     * value leaving that field alone. `409` for a worker. Answers the payload.
+     */
+    suspend fun putOrchestrator(sessionId: String, body: OrchestratorPut): ApiResult<OrchestratorPayload> =
+        put("api/sessions/${sessionId.encoded()}/orchestrator", body, serializer())
+
+    /** `409` while usage is still over the cutoff, naming the window and the reading. */
+    suspend fun resumeOrchestrator(sessionId: String): ApiResult<OrchestratorPayload> =
+        post("api/sessions/${sessionId.encoded()}/orchestrator/resume", JsonObject(emptyMap()), serializer())
+
+    /** Settles it as dismissed. It does not answer a worker's ask — that is the worker's own route. */
+    suspend fun dismissInboxItem(sessionId: String, itemId: String): ApiResult<InboxDismissed> =
+        post(
+            "api/sessions/${sessionId.encoded()}/orchestrator/inbox/${itemId.encoded()}/dismiss",
+            JsonObject(emptyMap()),
+            serializer(),
+        )
+
+    /**
+     * Records that the user answered one of the brief's questions. **It does not
+     * deliver the answer** — that is a `Re: …` message through [send], which goes
+     * first. `404` usually means the orchestrator already dropped it: done.
+     */
+    suspend fun answerDecision(sessionId: String, decisionId: String, text: String): ApiResult<DecisionAnsweredResponse> =
+        post(
+            "api/sessions/${sessionId.encoded()}/orchestrator/decisions/${decisionId.encoded()}/answered",
+            DecisionAnswered(text),
+            serializer(),
+        )
+
+    /**
+     * Hand it a task. Nothing is started: the orchestrator decides. The draft, if one
+     * was named, is removed only after filing, so a refusal keeps it. `409` past 20
+     * open tasks; `403` for a mode a phone may not set.
+     */
+    suspend fun fileTask(sessionId: String, body: TaskFiling): ApiResult<TaskFiled> =
+        post("api/sessions/${sessionId.encoded()}/orchestrator/tasks", body, serializer())
+
+    /** Take it back: it becomes a draft again — the same one, when it came from one. */
+    suspend fun withdrawTask(sessionId: String, itemId: String): ApiResult<TaskWithdrawn> =
+        post(
+            "api/sessions/${sessionId.encoded()}/orchestrator/tasks/${itemId.encoded()}/withdraw",
+            JsonObject(emptyMap()),
+            serializer(),
+        )
+
     // ---------------------------------------------------------------- plumbing
 
     private suspend fun <T> get(
@@ -527,6 +597,18 @@ class BridgeApi(
             .build()
     }
 
+    private suspend inline fun <reified B, T> put(
+        path: String,
+        body: B,
+        deserializer: KSerializer<T>,
+    ): ApiResult<T> = execute(deserializer, clients.api) { config ->
+        val json = AppJson.encodeToString(body)
+        Request.Builder()
+            .url(config.url(path))
+            .put(json.toRequestBody(JSON_MEDIA))
+            .build()
+    }
+
     private suspend fun <T> delete(
         path: String,
         deserializer: KSerializer<T>,
@@ -546,6 +628,24 @@ class BridgeApi(
         }
         try {
             client.newCall(build(config)).execute().use { response ->
+                // Before the status check, because one of the shapes is a 200 login
+                // page — and before reading the body, which is Cloudflare's, not ours.
+                if (AccessChallenge.isChallenge(response)) {
+                    Tgx.w(
+                        "${response.request.method} ${response.request.url.encodedPath} -> " +
+                            "${response.code}: Cloudflare Access refused it" +
+                            (AccessChallenge.redirectHost(response)?.let { " (redirect to $it)" } ?: ""),
+                    )
+                    return@withContext ApiResult.AccessDenied(response.code)
+                }
+                if (AccessChallenge.isTunnelDown(response)) {
+                    Tgx.w("${response.request.method} ${response.request.url.encodedPath} -> ${response.code}: tunnel has no bridge behind it")
+                    return@withContext ApiResult.Http(
+                        response.code,
+                        "Cloudflare could not reach the bridge (HTTP ${response.code}) — " +
+                            "is the bridge machine on and cloudflared running?",
+                    )
+                }
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     Tgx.w("${response.request.method} ${response.request.url.encodedPath} -> ${response.code}")

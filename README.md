@@ -95,16 +95,87 @@ trusted:
   Links verifies per host and has no wildcard form, so that filter could never have
   verified however many files upstream served.
 
-Three origins are useful:
+Two origins are useful:
 
 | Origin | When |
 |---|---|
-| `https://tgxcode.com` | **No VPN needed.** A named Cloudflare tunnel (`cloudflared` as a systemd service in WSL) with a real Let's Encrypt cert, so it works from any network without Tailscale installed. Classed **remote**, same as below. Measured: `hello` at 0.29s, 36 chunks in 75s — it carries SSE perfectly well. |
-| `https://tg-dylanh.taild5c420.ts.net` | `tailscale serve` fronts 45888 with a Let's Encrypt cert, so no cleartext exception is needed and it works away from the desk — as long as the Tailscale app is running on the phone. The bridge classes it as **remote**, so `bypassPermissions`/`dontAsk` are dropped and terminals are refused — correct, and the app agrees rather than pretending. |
+| `https://tgxcode.com` | **No VPN needed.** A named Cloudflare tunnel (`cloudflared` as a systemd service in WSL) with a real Let's Encrypt cert, so it works from any network without Tailscale installed. The bridge classes it as **remote**, so `bypassPermissions`/`dontAsk` are dropped and terminals are refused — correct, and the app agrees rather than pretending. Measured: `hello` at 0.29s, 36 chunks in 75s — it carries SSE perfectly well. May have Cloudflare Access in front; see below. |
 | `http://127.0.0.1:45888` + `adb reverse tcp:45888 tcp:45888` | The dev loop. The phone's own loopback reaches the bridge over the adb transport, so the bridge stays bound to 127.0.0.1 and nothing needs LAN reachability. |
 
-Only the loopback row needs a cleartext exception. Both HTTPS origins have publicly
-trusted certs, so release builds reach them with no network-security config at all.
+`https://tg-dylanh.taild5c420.ts.net` (`tailscale serve` in front of 45888) was the
+remote origin before the tunnel. It is an **old machine** — don't pair against it.
+
+Only the loopback row needs a cleartext exception. The tunnel has a publicly trusted
+cert, so release builds reach it with no network-security config at all.
+
+### Behind Cloudflare Access
+
+Access puts a gate at Cloudflare's edge, in front of the tunnel. With a **Service
+Auth** policy on it, every request has to carry a service token as two headers, and
+the app sends them on every request: `/api/*`, health, the `/api/events` stream and
+a notification's Allow/Deny alike.
+
+```
+CF-Access-Client-Id:     <client id>.access
+CF-Access-Client-Secret: <client secret>
+```
+
+These are **in addition to** the bridge's own token, not instead of it. Access proves
+who you are to Cloudflare, and the bearer token proves it to the bridge. The pairing
+link carries only the bridge token, so the Access fields are entered separately and
+pasting a link never touches them.
+
+Getting the token:
+
+1. Zero Trust dashboard → **Access controls → Service credentials → Service Tokens →
+   Create Service Token**. Name it after the phone and pick a duration. Copy the
+   **Client Secret** straight away, because it is shown only once.
+2. In the Access application for `tgxcode.com`, add a policy with Action **Service
+   Auth** that includes that token.
+3. In the app: **Settings → Cloudflare Access (optional)**. Paste the Client ID and
+   the Client Secret, then **Test connection**. The secret is stored the same way as
+   the bridge token, encrypted with a KeyStore-bound key through `TokenCipher`, and it
+   is masked on screen.
+4. Only then switch Access on. Doing it the other way round locks the phone out with
+   a response the bridge never sees, so it never logs it either.
+
+Both fields empty means off. One field on its own is refused at Save, because Access
+treats half a pair the same as none. Sending the headers to an origin with no Access
+in front of it does no harm, since the bridge ignores them.
+
+**When Access says no**, the app shows *Cloudflare Access refused this request*, a
+screen of its own that is neither "not paired" nor "offline". The foreground
+notification says so too. The stream and the poll both stop instead of retrying,
+because nothing about the next attempt would differ. This matters more than it
+looks: a blocked `/api/events` means the bridge has no viewer and is auto-denying
+every ask, so the one thing the app must not do is sit on a dot that looks almost
+connected. Fix the token in Settings and **Test connection** or **Save** reconnects
+straight away.
+
+A response counts as Access, not the bridge, if any one of these holds. They match
+`docs/api.md` §*Cloudflare Access, when it is in front*, and the code is in
+`AccessChallenge.kt`:
+
+- a **3xx** whose `Location` is on `*.cloudflareaccess.com`, under `/cdn-cgi/access/`,
+  or on any other host;
+- a **401/403** carrying a `cf-access-*` header, or a `WWW-Authenticate` that names
+  Cloudflare;
+- a **401/403 on `/api/` that isn't JSON**. The bridge's own 401/403 are always
+  `application/json`, so its `401 {"error":"unauthorized"}` still means *not paired*;
+- **`text/html` on `/api/`** below 500, which is a login page served as a 200.
+
+A **5xx HTML page** is the exception. Cloudflare's `530` "error 1033" means the tunnel
+has no `cloudflared` behind it, which is reported as the bridge being unreachable,
+not as a token problem.
+
+**Redirects are off** on every client (`followRedirects(false)`), for two reasons.
+OkHttp strips only `Authorization` when a redirect changes host, so following Access's
+302 would hand the client secret to `cloudflareaccess.com`. And a followed redirect
+lands on a 200 login page, which hides the refusal. Nothing legitimate is lost:
+`docs/api.md` lists no `/api/` route that redirects (only `/pair`, which this app
+never calls), and there is one `OkHttpClient` in the app. `api`, both stream flavours
+and the notification client are all `newBuilder()`s of it, so the interceptor and the
+redirect setting reach every request.
 
 Release builds permit **no cleartext at all**; the debug variant overlays
 `app/src/debug/res/xml/network_security_config.xml` with a short allowlist. That has to
@@ -395,9 +466,34 @@ they now appear here, and where to find each one:
 | Slash commands | type `/` | |
 | Project colours | row stripe, card dot, a rule under the conversation's top bar | read-only: `PUT /api/prefs` is refused to remote callers |
 | Attachments | the + beside the message box, and on the New tab; images and 📎 files in the transcript | Photo (the system photo picker) or File (the document picker), up to five a message; needs a bridge with [TGXCode#206](https://github.com/TheYearIsTwentyGX/TGXCode/pull/206), which lets a remote caller upload at a 10MB cap. Photos larger than 2048px or not PNG/JPEG/WebP are re-encoded as JPEG first, so a HEIC arrives as something the model can see. Drafts cannot hold files, so the New tab's Save refuses while any are attached |
+| Orchestrators | an orchestrator's conversation opens on **Overview** (beside a Conversation tab); "Start as an orchestrator" and "Send to orchestrator…" on the New tab and on each draft; ⋮ → Make it an orchestrator / Orchestrator settings | see *Orchestrators* below |
 
-`StatusStore` (quota, history, colours) and `WorkspaceStore` (scheduled messages,
-snippets, schedules) hang off `BridgeRepository`'s `events`, `resyncs` and `pollRounds`
+### Orchestrators
+
+`web/orchestrator-page.js` in one column: the goal and progress strip, usage meters
+against the cutoff, **Needs you** (a pause with Resume, the brief's decisions answered
+with their option chips or a free reply, workers stuck on an ask, failed workers),
+**Tasks from you** with Take back, the brief, the workers with their six-stage track,
+the merge order, and the inbox under Activity with Dismiss. Its rules —
+`needsYou`, `workerStage`, `mergeOrder`, `progress` — are ported from
+`web/orchestrator-model.js` into `ui/orchestrator/OrchestratorModel.kt` and pinned by
+`OrchestratorTest`.
+
+An answer to a decision is sent first, as `Re: <question>` in the orchestrator's own
+mode, and recorded second, so nothing reads as answered unless it is on its way.
+Settings save field by field as they change, with a `null` limit sent as `null`.
+
+Workers are folded under their orchestrator: off the Sessions list (a search still finds
+them), as rows inside its Needs-you card, and with a banner on their own conversation
+leading back. A worker's ask its orchestrator still holds is notified silently and said
+aloud once the board calls it stuck.
+
+Left out, because the bridge refuses them to a remote caller: the worker drawer's
+"So far" digest (`…/orchestrator/read`) and a task's worktree hint. Per-orchestrator
+defaults live in prefs, which a phone cannot write either.
+
+`StatusStore` (quota, history, colours), `WorkspaceStore` (scheduled messages,
+snippets, schedules) and `OrchestratorStore` (payloads, the orchestrator list) hang off `BridgeRepository`'s `events`, `resyncs` and `pollRounds`
 flows. So each feature owns its own state, and none of them adds a branch to the
 repository's stream handler.
 
@@ -447,19 +543,3 @@ Also out, by choice:
 - the live board as a queue, and the task board's other columns, for the reason given
   above.
 
-**Cloudflare Access**, which is recommended upstream but not yet set up. If it is enabled
-in front of the tunnel, every request needs `CF-Access-Client-Id` and
-`CF-Access-Client-Secret` service-token headers. Nothing is built for it, but the seam is
-deliberate: both headers the app already sends are added by interceptors on the *base*
-OkHttp client, so a third interceptor there covers everything at once. That matters
-because `BridgeSse` builds its own `Request` and never passes through `BridgeApi` — the
-interceptor list is the only point that reaches both. Adding it means one interceptor, two
-fields on `BridgeConfig`, and two DataStore keys (route the secret through `TokenCipher`
-as the bearer token already is).
-
-One accident worth recording: the `hello` watchdog makes an Access misconfiguration
-legible for free. Access rejects with a 302 to `*.cloudflareaccess.com` or a 403 HTML
-page, neither of which is the `401` the stream loop special-cases — so without the
-watchdog the stream would open, never send `hello`, and retry at a 30s ceiling behind a
-yellow dot forever. With it, the app falls back after six seconds and the polling GETs
-report the real status.

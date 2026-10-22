@@ -135,7 +135,8 @@ class WorkspaceStore(
                     },
                     isError = true,
                 )
-                is ApiResult.Offline -> repo.report("Could not send it: ${result.message()}", isError = true)
+                is ApiResult.Offline, is ApiResult.AccessDenied ->
+                    repo.report("Could not send it: ${result.message()}", isError = true)
             }
         }
     }

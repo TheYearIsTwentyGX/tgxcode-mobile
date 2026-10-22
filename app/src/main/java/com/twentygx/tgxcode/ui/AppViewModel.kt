@@ -23,9 +23,16 @@ import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.data.model.SuggestedTask
 import com.twentygx.tgxcode.data.model.UserEvent
+import com.twentygx.tgxcode.data.model.BriefDecision
+import com.twentygx.tgxcode.data.model.InboxItem
+import com.twentygx.tgxcode.data.model.OpenTask
+import com.twentygx.tgxcode.data.model.SettingsPatch
+import com.twentygx.tgxcode.data.model.TaskFields
+import com.twentygx.tgxcode.data.net.BridgeConfig
 import com.twentygx.tgxcode.data.net.PairingInput
 import com.twentygx.tgxcode.data.repo.BridgeRepository
 import com.twentygx.tgxcode.data.repo.ConnState
+import com.twentygx.tgxcode.data.repo.isRefused
 import com.twentygx.tgxcode.data.settings.SettingsStore
 import com.twentygx.tgxcode.di.AppContainer
 import com.twentygx.tgxcode.service.BridgeService
@@ -56,6 +63,7 @@ class AppViewModel(
     val repo: BridgeRepository = container.repository
     val status = container.status
     val workspace = container.workspace
+    val orchestrators = container.orchestrators
 
     /** For the one-off reads the files sheet makes; nothing about them is held. */
     val api = container.api
@@ -186,6 +194,8 @@ class AppViewModel(
                     _settingsUi.value = ui.copy(
                         origin = ui.origin.ifBlank { config.origin },
                         token = ui.token.ifBlank { config.token },
+                        accessId = ui.accessId.ifBlank { config.accessId },
+                        accessSecret = ui.accessSecret.ifBlank { config.accessSecret },
                     )
                 }
             }
@@ -629,6 +639,79 @@ class AppViewModel(
         _answering.value = _answering.value - ask.requestId
     }
 
+    // ----------------------------------------------------------- orchestrators
+
+    /**
+     * Answer one of an orchestrator's brief questions. Sent in the orchestrator's own
+     * mode — the one its composer would send with — so answering does not move it.
+     */
+    fun answerDecision(orchestratorId: String, decision: BriefDecision, answer: String) = viewModelScope.launch {
+        val mode = if (repo.conversation.value?.sessionId == orchestratorId) modeFor(orchestratorId)
+        else repo.sessions.value.firstOrNull { it.sessionId == orchestratorId }?.permissionMode ?: "auto"
+        orchestrators.answerDecision(orchestratorId, decision, answer, mode)
+    }
+
+    fun saveOrchestratorSettings(orchestratorId: String, patch: SettingsPatch) =
+        viewModelScope.launch { orchestrators.saveSettings(orchestratorId, patch) }
+
+    fun resumeOrchestrator(orchestratorId: String) = viewModelScope.launch { orchestrators.resume(orchestratorId) }
+
+    fun dismissInboxItem(orchestratorId: String, item: InboxItem) =
+        viewModelScope.launch { orchestrators.dismiss(orchestratorId, item.id) }
+
+    fun withdrawTask(orchestratorId: String, task: OpenTask) =
+        viewModelScope.launch { orchestrators.withdraw(orchestratorId, task.id) }
+
+    fun makeOrchestrator(sessionId: String) = viewModelScope.launch { orchestrators.enable(sessionId) }
+
+    fun stopOrchestrating(sessionId: String) = viewModelScope.launch { orchestrators.disable(sessionId) }
+
+    /**
+     * Hand a stored draft over. The bridge removes it once filed. One open in the form
+     * and changed since goes as the form, so what is handed over is what is on screen.
+     */
+    fun sendDraftToOrchestrator(orchestratorId: String, draft: Draft) = viewModelScope.launch {
+        val state = _newSession.value
+        if (state.editingDraftId == draft.id && state.differsFrom(draft)) {
+            sendFormToOrchestrator(orchestratorId).join()
+            return@launch
+        }
+        if (orchestrators.fileTask(orchestratorId, draftId = draft.id) &&
+            _newSession.value.editingDraftId == draft.id
+        ) {
+            clearDraftEdit()
+        }
+    }
+
+    /**
+     * Hand the Start form over as it stands. A form showing a saved draft sends both,
+     * which files what is on screen and consumes the draft — an edit sent unsaved.
+     */
+    fun sendFormToOrchestrator(orchestratorId: String) = viewModelScope.launch {
+        val state = _newSession.value
+        val invalid = state.validate()
+            ?: "A task cannot carry attachments. Start the session, or remove the files."
+                .takeIf { state.attachments.isNotEmpty() }
+        if (invalid != null) {
+            _newSession.value = state.copy(error = invalid)
+            return@launch
+        }
+        _newSession.value = state.copy(starting = true, error = null)
+        val filed = orchestrators.fileTask(
+            orchestratorId,
+            draftId = state.editingDraftId,
+            fields = TaskFields(
+                cwd = state.cwd.orEmpty(),
+                prompt = state.prompt.trim(),
+                permissionMode = state.mode,
+                test = state.test,
+                model = state.model.takeIf { it.isNotBlank() },
+                effort = state.effort.takeIf { it.isNotBlank() },
+            ),
+        )
+        _newSession.value = if (filed) state.blankKeepingSetup() else _newSession.value.copy(starting = false)
+    }
+
     // ---------------------------------------------------------------- settings
 
     fun onPaste(text: String) {
@@ -643,6 +726,8 @@ class AppViewModel(
 
     fun onOrigin(text: String) { _settingsUi.value = _settingsUi.value.copy(origin = text) }
     fun onToken(text: String) { _settingsUi.value = _settingsUi.value.copy(token = text) }
+    fun onAccessId(text: String) { _settingsUi.value = _settingsUi.value.copy(accessId = text) }
+    fun onAccessSecret(text: String) { _settingsUi.value = _settingsUi.value.copy(accessSecret = text) }
 
     /**
      * Persist the choice *and* act on it. Kept separate from the switch's own
@@ -661,7 +746,7 @@ class AppViewModel(
      */
     fun test() = viewModelScope.launch {
         val ui = _settingsUi.value
-        val config = PairingInput.build(ui.origin, ui.token)
+        val config = ui.toConfig()
         if (config == null) {
             _settingsUi.value = ui.copy(probe = ProbeResult("That is not a usable address.", false))
             return@launch
@@ -675,7 +760,7 @@ class AppViewModel(
         // probing immediately asks the old config — which on a first pairing is no
         // config at all, and reports "could not reach the bridge" about a bridge
         // that is perfectly reachable.
-        if (!awaitConfig(config.origin)) {
+        if (!awaitConfig(config)) {
             _settingsUi.value = _settingsUi.value.copy(
                 testing = false,
                 probe = ProbeResult("Could not store that address.", false),
@@ -690,9 +775,18 @@ class AppViewModel(
         repo.onOriginChanged()
         val state = repo.probePairing()
         syncLease()
+        // The service may still hold a lease on a stream loop that a refusal ended,
+        // so dropping ours is not enough to reopen it.
+        repo.reconnect()
         val health = repo.health.value
         val text = when (state) {
             ConnState.NotPaired -> "Reached the bridge, but it refused the token."
+            // /api/health sits behind Access too, so health is null here and the
+            // generic "could not reach" would be the wrong diagnosis.
+            ConnState.AccessDenied ->
+                "Cloudflare Access refused the request. Check the Access client ID " +
+                    "and secret below, and that the service token is in the " +
+                    "application's Service Auth policy."
             else -> if (health != null) {
                 "Connected to ${health.host ?: "the bridge"} " +
                     "(v${health.version ?: "?"}, ${health.sessions} sessions)" +
@@ -703,18 +797,19 @@ class AppViewModel(
         }
         _settingsUi.value = _settingsUi.value.copy(
             testing = false,
-            probe = ProbeResult(text, state != ConnState.NotPaired && health != null),
+            probe = ProbeResult(text, !state.isRefused && health != null),
         )
     }
 
     fun save() = viewModelScope.launch {
         val ui = _settingsUi.value
-        PairingInput.build(ui.origin, ui.token)?.let {
+        ui.toConfig()?.let {
             container.settings.save(it)
-            awaitConfig(it.origin)
+            awaitConfig(it)
             repo.onOriginChanged()
             if (lease == null) lease = repo.acquire()
             repo.probePairing()
+            repo.reconnect()
         }
     }
 
@@ -722,10 +817,18 @@ class AppViewModel(
      * Waits for a DataStore write to reach the in-memory config the network layer
      * reads. Returns false if it never arrives, rather than hanging the UI.
      */
-    private suspend fun awaitConfig(origin: String): Boolean =
+    private suspend fun awaitConfig(saved: BridgeConfig): Boolean =
         withTimeoutOrNull(3_000) {
-            container.config.first { it?.origin == origin }
+            // Every field, not just the origin: changing only the service token keeps
+            // the origin, and probing before the new secret surfaces would test the old.
+            container.config.first {
+                it?.origin == saved.origin && it.token == saved.token &&
+                    it.accessId == saved.accessId && it.accessSecret == saved.accessSecret
+            }
         } != null
+
+    private fun SettingsUiState.toConfig(): BridgeConfig? =
+        if (accessHalfSet) null else PairingInput.build(origin, token, accessId, accessSecret)
 
     fun forget() = viewModelScope.launch {
         onStop()
@@ -760,6 +863,18 @@ class AppViewModel(
     fun setNewEffort(effort: String) { _newSession.value = _newSession.value.copy(effort = effort) }
     fun setNewPrompt(text: String) { _newSession.value = _newSession.value.copy(prompt = text) }
     fun setNewTest(on: Boolean) { _newSession.value = _newSession.value.copy(test = on) }
+
+    /**
+     * Ticking it moves a `plan` session to `auto`, as the desktop's dialog does: in plan
+     * mode every worker it starts would wait on your approval before doing anything.
+     */
+    fun setNewOrchestrator(on: Boolean) {
+        val state = _newSession.value
+        _newSession.value = state.copy(
+            orchestrator = on,
+            mode = if (on && state.mode == "plan") "auto" else state.mode,
+        )
+    }
 
     fun startSession(onStarted: (String) -> Unit) = viewModelScope.launch {
         val state = _newSession.value
@@ -796,6 +911,7 @@ class AppViewModel(
             model = state.model,
             effort = state.effort,
             attachments = files.readyRefs(),
+            orchestrator = state.orchestrator,
         )
             .onSuccess { id ->
                 _newSession.value = _newSession.value.copy(
@@ -803,6 +919,7 @@ class AppViewModel(
                     prompt = "",
                     attachments = emptyList(),
                     editingDraftId = null,
+                    orchestrator = false,
                 )
                 justCreated = id
                 onStarted(id)
@@ -978,7 +1095,10 @@ class AppViewModel(
                     cwd = draft.cwd,
                     error = null,
                 )
-                repo.report(if (editing == null) "Saved as a draft" else "Draft updated")
+                repo.report(
+                    (if (editing == null) "Saved as a draft" else "Draft updated") +
+                        (if (state.orchestrator) " — a draft does not remember “Start as an orchestrator”" else ""),
+                )
             }
             .onFailure { error ->
                 _newSession.value = _newSession.value.copy(
@@ -1058,6 +1178,8 @@ data class NewSessionUiState(
     val effort: String = "",
     val prompt: String = "",
     val test: Boolean = false,
+    /** Start it as an orchestrator. Not sticky, and a draft cannot remember it. */
+    val orchestrator: Boolean = false,
     /** Held until Start, then uploaded to [cwd]. Drafts cannot carry them. */
     val attachments: List<StagedFile> = emptyList(),
     val starting: Boolean = false,

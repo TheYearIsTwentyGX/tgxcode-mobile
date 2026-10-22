@@ -172,6 +172,14 @@ fun NewSessionScreen(
     onDeleteDraft: (Draft) -> Unit,
     onClearDraftEdit: () -> Unit,
     modifier: Modifier = Modifier,
+    orchestrator: Boolean = false,
+    onOrchestratorChanged: (Boolean) -> Unit = {},
+    /**
+     * Hand the form, or a draft, to an orchestrator instead of starting it. Null when
+     * there is no orchestrator to send to, which is `GET /api/orchestrators`'s call.
+     */
+    onSendToOrchestrator: (() -> Unit)? = null,
+    onSendDraftToOrchestrator: ((Draft) -> Unit)? = null,
 ) {
     var dirMenu by remember { mutableStateOf(false) }
     var modeMenu by remember { mutableStateOf(false) }
@@ -225,6 +233,7 @@ fun NewSessionScreen(
                 },
                 onStart = onStartDraft,
                 onDelete = onDeleteDraft,
+                onSendToOrchestrator = onSendDraftToOrchestrator,
             )
             HorizontalDivider(color = tgx.outlineSoft, thickness = 1.dp)
         }
@@ -343,6 +352,24 @@ fun NewSessionScreen(
             )
         }
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = orchestrator, onCheckedChange = onOrchestratorChanged)
+            Text(
+                "Start as an orchestrator",
+                style = MaterialTheme.typography.bodySmall,
+                color = tgx.textMuted,
+            )
+        }
+        if (orchestrator) {
+            Text(
+                "It starts worker sessions and reads what they report from an inbox, " +
+                    "rather than doing the work itself." +
+                    if (mode == "plan") " In plan mode every worker it starts waits on your approval first." else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (mode == "plan") tgx.yellow else tgx.textFaint,
+            )
+        }
+
         error?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = tgx.red)
         }
@@ -376,6 +403,22 @@ fun NewSessionScreen(
                 },
             )
         }
+
+        // A worker cannot be an orchestrator, and a task carries no files — the two
+        // reasons it would be refused, said here rather than after the press.
+        if (onSendToOrchestrator != null) {
+            OutlinedButton(
+                onClick = onSendToOrchestrator,
+                enabled = !busy && ready && !orchestrator && attachments.isEmpty(),
+                shape = Pill,
+                modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.PrimaryButtonHeight),
+            ) { Text("Send to orchestrator…") }
+            when {
+                orchestrator -> "Untick “Start as an orchestrator” to hand this over — a worker cannot be one."
+                attachments.isNotEmpty() -> "A task cannot carry attachments."
+                else -> null
+            }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = tgx.textFaint) }
+        }
     }
 }
 
@@ -393,6 +436,7 @@ private fun DraftsSection(
     onEdit: (Draft) -> Unit,
     onStart: (Draft) -> Unit,
     onDelete: (Draft) -> Unit,
+    onSendToOrchestrator: ((Draft) -> Unit)?,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -425,6 +469,7 @@ private fun DraftsSection(
                         onEdit = { onEdit(draft) },
                         onStart = { onStart(draft) },
                         onDelete = { onDelete(draft) },
+                        onSendToOrchestrator = onSendToOrchestrator?.let { send -> { send(draft) } },
                     )
                 }
             }
@@ -440,6 +485,7 @@ private fun DraftRow(
     onEdit: () -> Unit,
     onStart: () -> Unit,
     onDelete: () -> Unit,
+    onSendToOrchestrator: (() -> Unit)?,
 ) {
     val meta = listOfNotNull(
         draft.projectName?.takeIf { it.isNotBlank() },
@@ -489,6 +535,14 @@ private fun DraftRow(
             shape = Pill,
             modifier = Modifier.fillMaxWidth().heightIn(min = Metrics.TouchTarget),
         ) { Text(if (editing) "Save and start" else "Start") }
+
+        if (onSendToOrchestrator != null) {
+            TextButton(
+                onClick = onSendToOrchestrator,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Send to orchestrator…") }
+        }
     }
 }
 

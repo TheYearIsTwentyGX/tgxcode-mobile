@@ -29,6 +29,8 @@ import com.twentygx.tgxcode.data.model.AgentDoneEvent
 import com.twentygx.tgxcode.data.model.AssistantEvent
 import com.twentygx.tgxcode.data.model.CompactEvent
 import com.twentygx.tgxcode.data.model.HandoffEvent
+import com.twentygx.tgxcode.data.model.OrchestratorInboxEvent
+import com.twentygx.tgxcode.data.model.OrchestratorMessageEvent
 import com.twentygx.tgxcode.data.model.PeerMessageEvent
 import com.twentygx.tgxcode.data.model.SuggestionDecision
 import com.twentygx.tgxcode.data.model.SuggestionEvent
@@ -136,6 +138,16 @@ fun EventItem(
                 (event.fromTitle ?: "another session") +
                 (event.fromProject?.let { " · $it" } ?: ""),
             text = listOfNotNull(event.title, event.text).joinToString("\n\n"),
+            modifier = padded,
+        )
+        // The bridge waking an idle orchestrator, not anybody typing: one muted line.
+        is OrchestratorInboxEvent -> CentredNote(
+            com.twentygx.tgxcode.ui.orchestrator.inboxNudgeText(event.count, event.counts, event.summary),
+            padded,
+        )
+        is OrchestratorMessageEvent -> FromElsewhere(
+            heading = "From your orchestrator" + (event.fromTitle?.let { ", $it" } ?: ""),
+            text = event.text.orEmpty(),
             modifier = padded,
         )
         // The event carries its own text, but the web client discards it and says

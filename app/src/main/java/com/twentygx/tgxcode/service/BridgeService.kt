@@ -50,6 +50,24 @@ class BridgeService : Service() {
     /** Sessions we currently hold a notification for, so stale ones can be cleared. */
     private val shown = mutableMapOf<String, Ask>()
 
+    /** Of [shown], those posted silently because an orchestrator is carrying them. */
+    private val quietShown = mutableSetOf<String>()
+
+    /**
+     * Whether a fresh ask on [sessionId] is its orchestrator's to answer. The board says
+     * so once it has caught up; until then, a worker whose orchestrator is listed and
+     * not paused is taken to be carried — the bridge's own starting assumption.
+     */
+    private fun carried(repo: com.twentygx.tgxcode.data.repo.BridgeRepository, sessionId: String): Boolean {
+        repo.board.value?.sessions?.firstOrNull { it.sessionId == sessionId && it.ask != null }?.let {
+            return it.askForOrchestrator
+        }
+        val worker = repo.sessions.value.firstOrNull { it.sessionId == sessionId }?.worker ?: return false
+        if (worker.closed) return false
+        val host = repo.sessions.value.firstOrNull { it.sessionId == worker.orchestratorId } ?: return false
+        return host.orchestrator?.paused == false
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -101,6 +119,10 @@ class BridgeService : Service() {
                     "Not paired",
                     "This device has no token",
                 )
+                ConnState.AccessDenied -> AskNotifications.ServiceState(
+                    "Blocked by Cloudflare Access",
+                    "Check the service token in Settings — asks are being auto-denied",
+                )
                 else -> AskNotifications.ServiceState(
                     "Not connected",
                     "Asks will be auto-denied",
@@ -120,6 +142,10 @@ class BridgeService : Service() {
      *    notification the board no longer lists as blocked. Without this a phone that
      *    lost signal for ten minutes offers to allow something decided long ago —
      *    worse than no notification at all.
+     *
+     * An orchestrator's worker is the one exception to "loud": its orchestrator is
+     * expected to answer, so the notification is posted silently while the board says
+     * the ask is the orchestrator's, and re-posted aloud once it turns `you` — stuck.
      */
     private suspend fun watchAsks(app: TgxApp) {
         val repo = app.container.repository
@@ -132,10 +158,13 @@ class BridgeService : Service() {
                         val ask = event.ask
                         val id = ask.sessionId ?: return@collect
                         shown[id] = ask
-                        AskNotifications.show(context, ask, repo.titleOf(id))
+                        val quiet = carried(repo, id)
+                        if (quiet) quietShown += id else quietShown -= id
+                        AskNotifications.show(context, ask, repo.titleOf(id), quiet)
                     }
                     is StreamEvent.PermissionResolved -> {
                         shown.remove(event.sessionId)
+                        quietShown -= event.sessionId
                         AskNotifications.cancel(context, event.sessionId)
                     }
                     else -> Unit
@@ -148,14 +177,20 @@ class BridgeService : Service() {
             val blocked = board.sessions.mapNotNull { card ->
                 card.ask?.let { card.sessionId to it.copy(sessionId = card.sessionId) }
             }.toMap()
+            val carriedNow = board.sessions.filter { it.askForOrchestrator }.map { it.sessionId }.toSet()
 
-            // Raise anything the board knows about that we missed.
+            // Raise anything the board knows about that we missed — and say aloud a
+            // worker's ask its orchestrator has stopped getting to.
             for ((sessionId, ask) in blocked) {
-                if (shown[sessionId]?.requestId != ask.requestId) {
+                val quiet = sessionId in carriedNow
+                val louder = sessionId in quietShown && !quiet
+                if (shown[sessionId]?.requestId != ask.requestId || louder) {
                     shown[sessionId] = ask
-                    AskNotifications.show(context, ask, repo.titleOf(sessionId))
+                    if (quiet) quietShown += sessionId else quietShown -= sessionId
+                    AskNotifications.show(context, ask, repo.titleOf(sessionId), quiet)
                 }
             }
+            quietShown.retainAll(blocked.keys)
             // Clear anything that is no longer blocked.
             for (sessionId in shown.keys - blocked.keys) {
                 AskNotifications.cancel(context, sessionId)

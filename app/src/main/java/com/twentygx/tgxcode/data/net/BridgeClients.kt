@@ -50,13 +50,40 @@ private class AuthInterceptor(private val tokenProvider: () -> String?) : Interc
 }
 
 /**
+ * A Cloudflare Access service token, for a bridge that sits behind Access.
+ *
+ * Read fresh on every call, like [AuthInterceptor], and on the base client for the
+ * same reason the other two are: `BridgeSse` builds its own `Request` and never
+ * passes through `BridgeApi`, so the interceptor list is the only point that reaches
+ * every call — the stream, the held stream and a notification's answer included.
+ *
+ * Both headers or neither. [BridgeConfig.access] is null for a half-set pair.
+ */
+private class AccessInterceptor(
+    private val accessProvider: () -> Pair<String, String>?,
+) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val (id, secret) = accessProvider() ?: return chain.proceed(chain.request())
+        return chain.proceed(
+            chain.request().newBuilder()
+                .header("CF-Access-Client-Id", id)
+                .header("CF-Access-Client-Secret", secret)
+                .build(),
+        )
+    }
+}
+
+/**
  * One client per process, in two flavours built with `newBuilder()` so they share a
  * dispatcher, a connection pool and their threads.
  *
  * There is deliberately **no HTTP cache**. Every response here is live state, and a
  * cache is only a way to render something stale.
  */
-class BridgeClients(tokenProvider: () -> String?) {
+class BridgeClients(
+    tokenProvider: () -> String?,
+    accessProvider: () -> Pair<String, String>? = { null },
+) {
 
     private val base: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -64,8 +91,23 @@ class BridgeClients(tokenProvider: () -> String?) {
         .writeTimeout(20, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        // No redirects, for two reasons, both about Cloudflare Access.
+        //
+        // OkHttp drops `Authorization` when a redirect changes host, but nothing
+        // else — so following Access's 302 to `<team>.cloudflareaccess.com` would
+        // hand that host the service token's client secret. And a followed redirect
+        // lands on a 200 login page, which hides the refusal [AccessChallenge]
+        // exists to see.
+        //
+        // Nothing legitimate is lost: no `/api/` route redirects (`docs/api.md` names
+        // only `/pair`, which this app never calls), and an `http://` origin that
+        // Cloudflare would upgrade should fail visibly rather than send a token in
+        // the clear first.
+        .followRedirects(false)
+        .followSslRedirects(false)
         .addInterceptor(ClientHeaderInterceptor())
         .addInterceptor(AuthInterceptor(tokenProvider))
+        .addInterceptor(AccessInterceptor(accessProvider))
         .build()
 
     /** Ordinary requests: bounded end to end. */

@@ -24,7 +24,7 @@ class AttachmentUploadTest {
     fun setUp() {
         server.start()
         val config = BridgeConfig(server.url("/"), "t".repeat(43))
-        api = BridgeApi(BridgeClients { config.token }) { config }
+        api = BridgeApi(BridgeClients({ config.token })) { config }
     }
 
     @After
