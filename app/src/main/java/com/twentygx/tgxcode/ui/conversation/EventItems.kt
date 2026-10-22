@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import com.twentygx.tgxcode.data.model.AgentDoneEvent
 import com.twentygx.tgxcode.data.model.AssistantEvent
 import com.twentygx.tgxcode.data.model.CompactEvent
+import com.twentygx.tgxcode.data.model.HandoffEvent
+import com.twentygx.tgxcode.data.model.PeerMessageEvent
 import com.twentygx.tgxcode.data.model.SuggestionDecision
 import com.twentygx.tgxcode.data.model.SuggestionEvent
 import com.twentygx.tgxcode.data.model.SystemEvent
@@ -78,6 +80,7 @@ fun EventItem(
     modifier: Modifier = Modifier,
     suggestions: SuggestionSlot? = null,
     userActions: UserTurnActions? = null,
+    onOpenAgent: ((toolUseId: String, title: String?) -> Unit)? = null,
 ) {
     val padded = modifier
         .fillMaxWidth()
@@ -97,12 +100,43 @@ fun EventItem(
             }
         }
         is ThinkingEvent -> ThinkingBlock(event, padded)
-        is ToolEvent -> ToolRow(event, expanded, { onToggleTool(event.id) }, padded)
-        is SystemEvent -> SystemChip(event, padded)
-        is AgentDoneEvent -> CentredNote(
-            "Subagent ${event.status ?: "finished"}" +
-                (event.summary?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: ""),
+        is ToolEvent -> ToolRow(
+            event,
+            expanded,
+            { onToggleTool(event.id) },
             padded,
+            // Only a call that spawned an agent with a transcript on disk has
+            // anywhere to go; a background shell reports through the same field.
+            onOpenAgent = onOpenAgent?.takeIf { event.agent?.hasTranscript == true }?.let { open ->
+                { open(event.id, event.agent?.description ?: event.agent?.agentType) }
+            },
+        )
+        is SystemEvent -> SystemChip(event, padded)
+        is AgentDoneEvent -> {
+            val text = "Subagent ${event.status ?: "finished"}" +
+                (event.summary?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: "")
+            val toolUseId = event.toolUseId
+            if (onOpenAgent != null && event.hasTranscript && toolUseId != null) {
+                CentredNote(
+                    "$text · open ›",
+                    padded.clickable { onOpenAgent(toolUseId, event.summary) },
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                CentredNote(text, padded)
+            }
+        }
+        is PeerMessageEvent -> FromElsewhere(
+            heading = "Message from ${event.fromName ?: event.from ?: "another session"}",
+            text = event.text.orEmpty(),
+            modifier = padded,
+        )
+        is HandoffEvent -> FromElsewhere(
+            heading = "Handed over from " +
+                (event.fromTitle ?: "another session") +
+                (event.fromProject?.let { " · $it" } ?: ""),
+            text = listOfNotNull(event.title, event.text).joinToString("\n\n"),
+            modifier = padded,
         )
         // The event carries its own text, but the web client discards it and says
         // this instead — what matters is that it happened, not what was dropped.
@@ -219,14 +253,43 @@ private fun SystemChip(event: SystemEvent, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun CentredNote(text: String, modifier: Modifier = Modifier) {
+private fun CentredNote(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: androidx.compose.ui.graphics.Color = tgx.textFaint,
+) {
     Text(
         text,
         style = MaterialTheme.typography.labelMedium,
-        color = tgx.textFaint,
+        color = color,
         textAlign = TextAlign.Center,
         modifier = modifier,
     )
+}
+
+/**
+ * A message that came from another session — over the peer socket, or as a handoff.
+ *
+ * On the left and in a card, not in the blue bubble: the bubble means "you typed this",
+ * and a transcript that drew another session's words there would read as though you had.
+ */
+@Composable
+private fun FromElsewhere(heading: String, text: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .padding(end = 28.dp)
+            .background(tgx.s2, RoundedCornerShape(Radius.Lg))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(heading, style = MaterialTheme.typography.labelMedium, color = tgx.peach)
+        if (text.isNotBlank()) {
+            MessageActions(
+                markdown = text,
+                modifier = Modifier.padding(top = 4.dp),
+                selectable = { MarkdownText(text) },
+            ) { MarkdownText(text, Modifier.fillMaxWidth()) }
+        }
+    }
 }
 
 /**
@@ -252,6 +315,7 @@ private fun ToolRow(
     expanded: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenAgent: (() -> Unit)? = null,
 ) {
     val colors = tgx
     val status = toolStatusChip(event)
@@ -295,6 +359,18 @@ private fun ToolRow(
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
+        }
+
+        if (onOpenAgent != null) {
+            Text(
+                if (event.isRunning) "Watch the subagent ›" else "Open the subagent's transcript ›",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(onClick = onOpenAgent)
+                    .heightIn(min = Metrics.TouchTarget)
+                    .padding(horizontal = 10.dp, vertical = 12.dp),
+            )
         }
 
         if (expanded) {

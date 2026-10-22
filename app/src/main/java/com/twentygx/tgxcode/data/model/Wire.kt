@@ -59,7 +59,83 @@ data class SessionDetail(
      * is still open.
      */
     val suggestions: Map<String, SuggestionDecision> = emptyMap(),
+    /**
+     * With `?turns=K`: the whole conversation's rail, in file order, whatever was
+     * loaded. Empty from a bridge older than turn windows, which answers the whole
+     * transcript instead.
+     */
+    val turns: List<TurnMark> = emptyList(),
+    val window: TranscriptWindow? = null,
 )
+
+/**
+ * One entry of the turn rail: a turn of yours, or a plan or question inside one.
+ *
+ * [offset] is a byte position a window may start at — and for a plan or question it is
+ * the *turn's*, not its own line's, so no window ever starts halfway through a turn.
+ * [id] is the id the same moment has as an event, which is how a client tells what it
+ * has loaded.
+ */
+@Serializable
+data class TurnMark(
+    /** `turn`, `plan` or `question`. */
+    val kind: String = "turn",
+    val id: String = "",
+    val offset: Long = 0,
+    val ts: String? = null,
+    /** Turns only: the text, clipped to 460 characters. */
+    val text: String? = null,
+    val command: SlashCommand? = null,
+    /** Plans and questions: `pending`, `ok` or `error`. */
+    val status: String? = null,
+) {
+    val isTurn: Boolean get() = kind == "turn"
+
+    fun label(): String = when (kind) {
+        "plan" -> "Plan"
+        "question" -> "Question"
+        else -> command?.render()
+            ?: text?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
+            ?: "(no text)"
+    }
+}
+
+/** Where the loaded window begins: a byte [start] (0 for everything) and its first turn's index. */
+@Serializable
+data class TranscriptWindow(val start: Long = 0, val startTurn: Int = 0)
+
+/** `GET /api/sessions/:id/range`: the events in bytes `[from, to)`. */
+@Serializable
+data class RangeResponse(
+    val events: List<TranscriptEvent> = emptyList(),
+    val from: Long = 0,
+    val to: Long = 0,
+)
+
+/**
+ * `GET /api/sessions/:id/subagent?toolUseId=&offset=` — one subagent's transcript, from
+ * a byte offset that follows the same contract as `/since`.
+ *
+ * Undocumented in `docs/api.md`; read from `SessionIndex.subagent` in
+ * `bridge/sessions.js`.
+ */
+@Serializable
+data class SubagentResponse(
+    val toolUseId: String? = null,
+    val agentId: String? = null,
+    val agentType: String? = null,
+    val description: String? = null,
+    val events: List<TranscriptEvent> = emptyList(),
+    val offset: Long = 0,
+    val reset: Boolean = false,
+)
+
+/**
+ * The `agent` field of `POST /api/subscribe` — an **object**, `{toolUseId, offset}`,
+ * not the agent's id. Follows that subagent's file while the session stays followed.
+ */
+@Serializable
+data class AgentFollow(val toolUseId: String, val offset: Long = 0)
 
 @Serializable
 data class SinceResponse(
@@ -74,7 +150,7 @@ data class SubscribeRequest(
     val clientId: String,
     val sessionId: String? = null,
     val offset: Long = 0,
-    val agent: String? = null,
+    val agent: AgentFollow? = null,
     /**
      * Always true, on every screen. The tab badge is drawn from the board and has to
      * keep arriving while a conversation is open.

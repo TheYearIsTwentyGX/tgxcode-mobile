@@ -80,6 +80,12 @@ fun ConversationScreen(
     userActions: UserTurnActions? = null,
     onDropQueued: (String) -> Unit = {},
     onMoveQueued: (String, Int) -> Unit = { _, _ -> },
+    /** Load the stretch above the window: from a turn offset, or null for the next few turns. */
+    onLoadEarlier: (Long?) -> Unit = { onLoadAll() },
+    /** Open the transcript of the subagent a tool call spawned. */
+    onOpenAgent: ((toolUseId: String, title: String?) -> Unit)? = null,
+    turnsOpen: Boolean = false,
+    onTurnsOpenChanged: (Boolean) -> Unit = {},
 ) {
     if (conversation == null) {
         // A just-created session is not readable until Claude Code has written its
@@ -109,7 +115,7 @@ fun ConversationScreen(
      * `events.lastIndex` therefore lands one event short of the end, every single
      * time. Hence a val, rather than a `+ 1` at each use site to get wrong.
      */
-    val headerCount = if ((conversation.truncated?.dropped ?: 0) > 0) 1 else 0
+    val headerCount = if (conversation.hasEarlier) 1 else 0
     val rowCount = headerCount + conversation.events.size
 
     /**
@@ -135,6 +141,12 @@ fun ConversationScreen(
      * *upward* from where you were reading. See the button below.
      */
     var resumeAt by rememberSaveable(conversation.sessionId) { mutableStateOf<String?>(null) }
+
+    /** Where the window began when [resumeAt] was set; a change is what says the load landed. */
+    var resumeFrom by rememberSaveable(conversation.sessionId) { mutableStateOf(-1L) }
+
+    /** A turn picked in the turn sheet, to scroll to once it is loaded. */
+    var jumpTo by rememberSaveable(conversation.sessionId) { mutableStateOf<String?>(null) }
 
     val nearEndSlopPx = with(LocalDensity.current) { Metrics.StickToBottomSlop.roundToPx() }
     val distanceFromEnd by remember { derivedStateOf { listState.layoutInfo.distanceFromEnd() } }
@@ -222,15 +234,30 @@ fun ConversationScreen(
      * `indexById` is already the id → row lookup the repository keeps for patching
      * tools; this is its second customer.
      */
-    LaunchedEffect(resumeAt, rowCount) {
+    LaunchedEffect(resumeAt, rowCount, conversation.windowStart) {
         val id = resumeAt ?: return@LaunchedEffect
-        // Only once the replacement has landed — `truncated` going null is what says so.
-        if (conversation.truncated != null) return@LaunchedEffect
+        // Only once the earlier stretch has landed: the window start moving says so for
+        // a turn window, and `truncated` going null for a `?tail=` cut.
+        val landed = if (conversation.turns.isNotEmpty()) {
+            conversation.windowStart != resumeFrom
+        } else {
+            conversation.truncated == null
+        }
+        if (!landed) return@LaunchedEffect
         conversation.indexById[id]?.let { at -> listState.requestScrollToItem(at + headerCount) }
         // Cleared either way. If the boundary event is somehow not in the replacement
         // there is nothing to return to, and a request that can never be satisfied
         // should not outlive the load that made it.
         resumeAt = null
+    }
+
+    /** A jump lands once its turn is in hand — straight away if it already was. */
+    LaunchedEffect(jumpTo, rowCount) {
+        val id = jumpTo ?: return@LaunchedEffect
+        val at = conversation.indexById[id] ?: return@LaunchedEffect
+        pinned = false
+        listState.requestScrollToItem(at + headerCount)
+        jumpTo = null
     }
 
     Column(modifier.fillMaxSize()) {
@@ -241,24 +268,31 @@ fun ConversationScreen(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
-            conversation.truncated?.takeIf { it.dropped > 0 }?.let { truncated ->
+            if (conversation.hasEarlier) {
                 item(key = "load-all") {
                     TextButton(
                         onClick = {
                             // Tapping this says "I want to read what came before", so
                             // drop the pin and remember where we are. Answering a
                             // request for history with a jump to the end is the exact
-                            // opposite of it — and the button's own key is about to
-                            // disappear, so without a remembered event LazyColumn has
-                            // nothing left to anchor on and lands at the very top.
+                            // opposite of it — and when the button goes, LazyColumn
+                            // has nothing left to anchor on and lands at the very top.
                             pinned = false
                             resumeAt = conversation.events.firstOrNull()?.id
-                            onLoadAll()
+                            resumeFrom = conversation.windowStart
+                            onLoadEarlier(null)
                         },
                         modifier = Modifier.fillMaxWidth().padding(8.dp),
                     ) {
+                        val earlier = conversation.earlierTurns
                         Text(
-                            "${truncated.dropped} earlier events — load all",
+                            when {
+                                conversation.turns.isEmpty() ->
+                                    "${conversation.truncated?.dropped ?: 0} earlier events — load all"
+                                earlier > 0 ->
+                                    "$earlier earlier turn${if (earlier == 1) "" else "s"} — load more"
+                                else -> "Load the start of the conversation"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -284,6 +318,7 @@ fun ConversationScreen(
                         )
                     },
                     userActions = userActions,
+                    onOpenAgent = onOpenAgent,
                 )
             }
         }
@@ -308,6 +343,21 @@ fun ConversationScreen(
             onStop = onStop,
             modifier = Modifier.imePadding().navigationBarsPadding(),
             controls = controls.copy(onOpenQueue = { queueOpen = true }),
+        )
+    }
+
+    if (turnsOpen) {
+        TurnSheet(
+            conversation = conversation,
+            onPick = { mark ->
+                onTurnsOpenChanged(false)
+                jumpTo = mark.id
+                // Not in hand: load from that turn down to the window, then land on it.
+                if (mark.id !in conversation.indexById && mark.offset < conversation.windowStart) {
+                    onLoadEarlier(mark.offset)
+                }
+            },
+            onDismiss = { onTurnsOpenChanged(false) },
         )
     }
 

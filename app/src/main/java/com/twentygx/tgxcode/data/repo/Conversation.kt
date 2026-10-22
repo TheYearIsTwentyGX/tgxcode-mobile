@@ -11,6 +11,7 @@ import com.twentygx.tgxcode.data.model.ToolEvent
 import com.twentygx.tgxcode.data.model.ToolResultEvent
 import com.twentygx.tgxcode.data.model.TranscriptEvent
 import com.twentygx.tgxcode.data.model.Truncated
+import com.twentygx.tgxcode.data.model.TurnMark
 
 /**
  * One open conversation.
@@ -62,7 +63,34 @@ data class Conversation(
      * when streaming — and polled while not.
      */
     val checklist: TaskList? = null,
-)
+    /**
+     * The whole conversation's turn rail, from `?turns=`, whatever is loaded. Empty
+     * from a bridge older than turn windows — which then sent the whole transcript, or
+     * a `?tail=` cut described by [truncated].
+     */
+    val turns: List<TurnMark> = emptyList(),
+    /**
+     * The byte position [events] begin at: 0 when everything from the start is in hand.
+     * Moves *down* as earlier stretches are loaded, never up.
+     */
+    val windowStart: Long = 0,
+    /**
+     * Results that arrived for a call not in hand yet, keyed by the call's id.
+     *
+     * A stretch loaded with `/range` is parsed on its own, so the stretch loaded
+     * *first* — the newer one — can hold the result for a call in an older one. That
+     * result had nothing to patch when it came. Dropping it, as a live tail can afford
+     * to, would leave the call spinning forever once its stretch arrived; so it is held
+     * here and applied then.
+     */
+    val orphanResults: Map<String, ToolResultEvent> = emptyMap(),
+) {
+    /** There is transcript above what is loaded — by the turn window, or a `?tail=` cut. */
+    val hasEarlier: Boolean get() = windowStart > 0 || (truncated?.dropped ?: 0) > 0
+
+    /** Turns of yours above the loaded window, for the button that loads them. */
+    val earlierTurns: Int get() = turns.count { it.isTurn && it.offset < windowStart }
+}
 
 /**
  * Fold new events in.
@@ -86,6 +114,7 @@ fun Conversation.applyEvents(incoming: List<TranscriptEvent>, newOffset: Long?):
 
     val list = events.toMutableList()
     val index = indexById.toMutableMap()
+    val orphans = orphanResults.toMutableMap()
 
     for (event in incoming) {
         if (event.id.isBlank()) continue
@@ -95,11 +124,16 @@ fun Conversation.applyEvents(incoming: List<TranscriptEvent>, newOffset: Long?):
         // appending it would put a stray blank event in the log and leave the tool
         // spinning forever.
         if (event is ToolResultEvent) {
-            val target = event.toolId?.let { index[it] }
+            val toolId = event.toolId ?: continue
+            val target = index[toolId]
             if (target != null) {
                 (list[target] as? ToolEvent)?.let { list[target] = it.withResult(event) }
+            } else if (windowStart > 0 || orphans.isNotEmpty()) {
+                // The call may be in a stretch not loaded yet. Held only while there
+                // is transcript above the window: on a whole transcript, no call is
+                // coming and there is nothing to hold it for.
+                orphans[toolId] = event
             }
-            // No matching call means the tail started after it; nothing to show.
             continue
         }
 
@@ -118,5 +152,58 @@ fun Conversation.applyEvents(incoming: List<TranscriptEvent>, newOffset: Long?):
         events = list,
         indexById = index,
         offset = if (newOffset != null) maxOf(offset, newOffset) else offset,
+        orphanResults = orphans,
+    )
+}
+
+/**
+ * Fold an *earlier* stretch in above what is loaded — `/range` for the part of the
+ * transcript the `?turns=` window left out.
+ *
+ * Same rules as [applyEvents], plus the one that only this direction has: a result
+ * held in [Conversation.orphanResults] whose call is in this stretch is applied to it
+ * now. And the other way round — a result in this stretch for a call further up still
+ * — is held in turn.
+ *
+ * [Conversation.offset] is not touched: it is where the live tail resumes, at the
+ * *end* of the file, and loading history says nothing about that.
+ *
+ * @param from the byte the stretch began at, which becomes the new window start.
+ */
+fun Conversation.prependEvents(incoming: List<TranscriptEvent>, from: Long): Conversation {
+    val head = mutableListOf<TranscriptEvent>()
+    val headIndex = mutableMapOf<String, Int>()
+    val orphans = orphanResults.toMutableMap()
+
+    for (event in incoming) {
+        if (event.id.isBlank()) continue
+        if (event is ToolResultEvent) {
+            val toolId = event.toolId ?: continue
+            val at = headIndex[toolId]
+            if (at != null) {
+                (head[at] as? ToolEvent)?.let { head[at] = it.withResult(event) }
+            } else if (from > 0) {
+                orphans[toolId] = event
+            }
+            continue
+        }
+        // Already loaded below — an overlap between the stretch and the window.
+        if (event.id in indexById || event.id in headIndex) continue
+        headIndex[event.id] = head.size
+        head.add(event)
+    }
+
+    // Results that were waiting on a call that has now arrived.
+    for ((at, event) in head.withIndex()) {
+        if (event !is ToolEvent) continue
+        orphans.remove(event.id)?.let { head[at] = event.withResult(it) }
+    }
+
+    val merged = head + events
+    return copy(
+        events = merged,
+        indexById = merged.withIndex().associate { (i, e) -> e.id to i },
+        windowStart = minOf(windowStart, from),
+        orphanResults = if (from > 0) orphans else emptyMap(),
     )
 }
