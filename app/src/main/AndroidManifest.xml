@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- InstallService: a phone install's download and commit, with the app in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Held for the length of one install, so a download goes on with the screen off. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
@@ -100,6 +104,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="tgxcode" android:host="session" />
+                <!-- The Installs screen, from an install notification. -->
+                <data android:scheme="tgxcode" android:host="installs" />
             </intent-filter>
         </activity>
 
@@ -120,6 +126,15 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="@string/fgs_special_use_justification" />
         </service>
+
+        <!--
+          dataSync: a phone install's download and commit, minutes at most, while the
+          app is in the background. See InstallService.
+        -->
+        <service
+            android:name=".service.InstallService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <receiver
             android:name=".service.AskActionReceiver"

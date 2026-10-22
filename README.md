@@ -233,19 +233,63 @@ How it goes, all in `data/install/PhoneInstaller.kt`:
 
 1. The bridge files a `pending` record and pushes it as `phone_install`. The app also
    reads `GET /api/phone-installs` on every (re)connect, at start, and every 20s while
-   polling, because nothing is replayed to a client that was away.
+   polling, because nothing is replayed to a client that was away. That read picks up
+   every `pending` record **and every record this phone claimed that is still
+   `downloading`**, so a claim whose process died, or whose answer was lost on the way
+   back, is resumed rather than left claimed for good.
 2. **Claim** with `POST …/status {state: "downloading"}`. A `409` means another phone has
    it, so the app drops it. Claims are keyed on `X-TGXCode-Viewer`, a random id this
    install makes once and keeps. It is sent on that route only, because on any other
-   route the header means "count this poller as a viewer".
+   route the header means "count this poller as a viewer". The claim is saved on the
+   phone *before* it is posted.
 3. **Download** to the cache, hashing as it goes, then check the size, the sha256, and
-   the bridge's `X-SHA256` against the record. Any mismatch reports `failed`.
+   the bridge's `X-SHA256` against the record. While it runs, the app posts
+   `{state: "downloading", progress: {bytes, total}}` about every 2s or every 5%,
+   whichever comes first: the desk's progress bar, and the heartbeat that tells the
+   bridge the claim is alive.
 4. Read the package name and version from the APK, report `installing`, and commit a
    `PackageInstaller` session with `USER_ACTION_NOT_REQUIRED` (API 31+) and
    `setRequestUpdateOwnership(true)` (API 34+).
 5. The session result comes back to `InstallResultReceiver` and is reported as
    `installed`, `needs_action` or `failed`. A quiet notification on **Install results**
    says how it ended.
+
+**Never silent.** A claim that goes quiet is the failure all this is built against: an
+install once sat `downloading` on the desk with nothing to say why.
+
+- *Background and screen off.* While anything is queued or running, `InstallService`
+  (a `dataSync` foreground service) holds the process up and a partial wake lock keeps
+  the CPU awake, so a download and its commit finish with the app in the background
+  and the screen off. Its notification is the ongoing **Downloading … / Installing …**
+  one, with a determinate bar, on **Install results**; the result notification takes
+  over when it ends. Android will not start a foreground service from the background;
+  then *Stay connected*'s service, if on, is what keeps the process.
+- *Reconnects.* The work runs on the app-wide scope, not the connection's, so the
+  stream dropping or the bridge restarting does not cancel it.
+- *Stalls.* No bytes for 60s fails the attempt, whatever the socket is doing. There is
+  no whole-call limit: a slow transfer that is still moving is left to finish.
+- *Retries.* Each install gets three attempts, 5s and 15s apart, before it is reported
+  `failed`. Each attempt resumes from the partial file with `Range: bytes=N-` and an
+  `If-Range` of the sha256 (the bridge's ETag). A `206` is added to the file; a `200`
+  starts it again.
+- *Every error is reported.* Any exception on the way is posted as `failed` with its
+  message. A report that does not get through, typically the `failed` from a transfer
+  cut off by the bridge restarting, which fails for the same reason, is kept with the
+  claim and sent again on the next catch-up.
+- *The bridge's side.* It flags a record `stalled` after 90s without a word, releases
+  the claim back to `pending` after three minutes, and fails it after three claims. If
+  the stream says a record the app is working on is `cancelled`, `failed`, or `pending`
+  with no progress, it is not this phone's any more and the work stops. A release is
+  picked straight back up, from the partial file.
+
+**Installs screen.** Settings → **Phone installs…**, or tap an install notification.
+It lists `GET /api/phone-installs`, kept live by `phone_install` events. Each row shows
+the label, package and version, the state and how long ago it changed, a progress bar
+while downloading, a **stalled** badge, the record's message, and **Retry** for anything
+failed, cancelled, waiting on a tap, or stalled. Retry is
+`POST /api/phone-installs/:id/retry`, which puts the record back to `pending`. It
+answers `410` if the APK is gone from the desktop and `409` if the app is already
+installed.
 
 **One tap per app, once.** A silent install only works for an update to a package
 TGXCode is already the installer of record for, which includes TGXCode itself. The first

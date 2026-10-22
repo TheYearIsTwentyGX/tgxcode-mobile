@@ -70,8 +70,13 @@ import com.twentygx.tgxcode.data.model.SuggestionActRequest
 import com.twentygx.tgxcode.data.model.SuggestionsResponse
 import com.twentygx.tgxcode.data.model.TaskStatus
 import com.twentygx.tgxcode.data.model.UploadedAttachment
+import com.twentygx.tgxcode.data.install.PhoneInstallRules
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonObject
@@ -84,6 +89,12 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+
+/** No bytes for this long and a download attempt has failed, however the socket looks. */
+const val DOWNLOAD_STALL_MILLIS = 60_000L
+
+/** Download answers that leave nothing to resume: gone, unknown, or a range past the end. */
+private val DROP_PARTIAL_ON = setOf(404, 410, 416)
 
 /**
  * Every route this app uses, and only those.
@@ -592,43 +603,127 @@ class BridgeApi(
             .build()
     }
 
+    /** Put a record back to `pending`. `410`: the APK is gone. `409`: it is installed. */
+    suspend fun retryPhoneInstall(id: String): ApiResult<JsonObject> =
+        post("api/phone-installs/${id.encoded()}/retry", JsonObject(emptyMap()), serializer())
+
     /**
      * Stream the APK to [dest], hashing it on the way, so a large one never sits in
      * memory and the check costs no second read. Verification is the caller's: this
      * reports what arrived, not whether it is right.
+     *
+     * **Resuming.** With [resumeFrom] > 0 the request carries `Range: bytes=N-` and an
+     * `If-Range` of the record's sha256, which is the bridge's ETag. A `206` from N is
+     * added to what is on disk (hashed first, so the digest covers the whole file); a
+     * `200` means the bridge sent all of it, and the file starts again.
+     *
+     * **Stalls.** No bytes for [stallMillis] fails the attempt, whatever the socket is
+     * doing — the read timeout cannot see a call stuck before its first read, or a
+     * process that was frozen and is not reading at all. Cancelling the coroutine
+     * cancels the call too, rather than waiting out a blocked read.
+     *
+     * A transfer cut off part-way leaves its partial file for the next attempt to
+     * resume from; only an answer that says there is nothing to resume deletes it.
+     *
+     * @param onProgress bytes on disk so far, and the whole length (0 if unknown).
+     *   Called on the IO thread for every buffer: throttle it.
      */
-    suspend fun downloadPhoneInstall(id: String, dest: java.io.File): ApiResult<DownloadedApk> =
-        withContext(Dispatchers.IO) {
-            val config = configProvider() ?: return@withContext ApiResult.Http(0, "No bridge configured")
-            val request = Request.Builder()
-                .url(config.url("api/phone-installs/${id.encoded()}/apk"))
-                .get()
-                .build()
+    suspend fun downloadPhoneInstall(
+        id: String,
+        dest: java.io.File,
+        resumeFrom: Long = 0,
+        sha256: String? = null,
+        stallMillis: Long = DOWNLOAD_STALL_MILLIS,
+        onProgress: (bytes: Long, total: Long) -> Unit = { _, _ -> },
+    ): ApiResult<DownloadedApk> = withContext(Dispatchers.IO) {
+        val config = configProvider() ?: return@withContext ApiResult.Http(0, "No bridge configured")
+        val request = Request.Builder()
+            .url(config.url("api/phone-installs/${id.encoded()}/apk"))
+            .get()
+            .apply {
+                if (resumeFrom > 0) {
+                    header("Range", "bytes=$resumeFrom-")
+                    sha256?.takeIf { it.isNotBlank() }?.let { header("If-Range", "\"$it\"") }
+                }
+            }
+            .build()
+        val call = clients.download.newCall(request)
+        val lastByteAt = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
+        val stalled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        coroutineScope<ApiResult<DownloadedApk>> {
+            // Also the cancellation path: when the caller gives up, this child is
+            // cancelled with it, and its `finally` breaks the blocked read below.
+            val watchdog = launch {
+                try {
+                    while (true) {
+                        delay(1_000)
+                        if (System.currentTimeMillis() - lastByteAt.get() > stallMillis) {
+                            stalled.set(true)
+                            call.cancel()
+                            break
+                        }
+                    }
+                } finally {
+                    if (!isActive) call.cancel()
+                }
+            }
             try {
-                clients.download.newCall(request).execute().use { response ->
+                call.execute().use { response ->
                     if (AccessChallenge.isChallenge(response)) {
                         Tgx.w("GET ${request.url.encodedPath} -> ${response.code}: Cloudflare Access refused it")
-                        return@withContext ApiResult.AccessDenied(response.code)
+                        return@coroutineScope ApiResult.AccessDenied(response.code)
                     }
                     if (!response.isSuccessful) {
                         val text = response.body.string()
                         Tgx.w("GET ${request.url.encodedPath} -> ${response.code}")
-                        return@withContext ApiResult.Http(response.code, errorOf(text, response.code))
+                        // Nothing to resume from: gone, unknown, or a range past the end.
+                        if (response.code in DROP_PARTIAL_ON) dest.delete()
+                        return@coroutineScope ApiResult.Http(response.code, errorOf(text, response.code))
                     }
+                    val contentRange = response.header("Content-Range")
+                    val answer = PhoneInstallRules.rangeAnswer(response.code, contentRange, resumeFrom)
+                    if (answer == PhoneInstallRules.RangeAnswer.MISMATCH) {
+                        dest.delete()
+                        return@coroutineScope ApiResult.Http(
+                            response.code,
+                            "The bridge answered a resume with the wrong range ($contentRange)",
+                        )
+                    }
+                    val append = answer == PhoneInstallRules.RangeAnswer.APPEND
                     val body = response.body
                     val digest = java.security.MessageDigest.getInstance("SHA-256")
+                    val buffer = ByteArray(64 * 1024)
                     var written = 0L
                     dest.parentFile?.mkdirs()
-                    body.byteStream().use { input ->
-                        dest.outputStream().use { output ->
-                            val buffer = ByteArray(64 * 1024)
+                    if (append) {
+                        dest.inputStream().use { input ->
                             while (true) {
-                                coroutineContext.ensureActive()
                                 val n = input.read(buffer)
                                 if (n < 0) break
                                 digest.update(buffer, 0, n)
+                                written += n
+                            }
+                        }
+                    }
+                    val length = body.contentLength().takeIf { it >= 0 }
+                    val total = (if (append) PhoneInstallRules.rangeTotal(contentRange) else null)
+                        ?: length?.let { written + it }
+                        ?: 0L
+                    if (append) Tgx.d("download $id: resuming at $written of $total")
+                    lastByteAt.set(System.currentTimeMillis())
+                    onProgress(written, total)
+                    body.byteStream().use { input ->
+                        java.io.FileOutputStream(dest, append).use { output ->
+                            while (true) {
+                                ensureActive()
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                lastByteAt.set(System.currentTimeMillis())
+                                digest.update(buffer, 0, n)
                                 output.write(buffer, 0, n)
                                 written += n
+                                onProgress(written, total)
                             }
                         }
                     }
@@ -638,19 +733,28 @@ class BridgeApi(
                             size = written,
                             sha256 = digest.digest().joinToString("") { "%02x".format(it) },
                             headerSha256 = response.header("X-SHA256"),
-                            contentLength = body.contentLength().takeIf { it >= 0 },
+                            contentLength = length,
+                            resumedFrom = if (append) resumeFrom else 0,
                         ),
                     )
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                dest.delete()
                 throw cancelled
             } catch (t: Throwable) {
-                Tgx.w("download failed", t)
-                dest.delete()
-                ApiResult.Offline(t)
+                // A read broken by our own cancel is the caller giving up, not a failure.
+                ensureActive()
+                val cause = if (stalled.get()) {
+                    java.net.SocketTimeoutException("No data for ${stallMillis / 1000}s — the transfer stalled")
+                } else {
+                    t
+                }
+                Tgx.w("download $id failed with ${dest.length()} bytes on disk", cause)
+                ApiResult.Offline(cause)
+            } finally {
+                watchdog.cancel()
             }
         }
+    }
 
     // ---------------------------------------------------------------- plumbing
 
@@ -779,6 +883,8 @@ data class DownloadedApk(
     /** The bridge's own `X-SHA256`, if it sent one. */
     val headerSha256: String?,
     val contentLength: Long?,
+    /** Where this answer started, when it continued a partial file; else 0. */
+    val resumedFrom: Long = 0,
 )
 
 private fun String.encoded(): String =

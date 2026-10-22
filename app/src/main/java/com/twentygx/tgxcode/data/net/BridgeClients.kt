@@ -180,12 +180,16 @@ class BridgeClients(
 
     /**
      * APKs from the phone-installs queue. Tens of megabytes over a cell link through a
-     * tunnel, so no whole-call bound worth the name — but a read that stalls for a
-     * minute is a dead transfer, not a slow one, and fails so the record can say so.
+     * tunnel, so **no whole-call bound**: the 15 minutes this used to have would cut
+     * off a slow transfer that was still moving, and on a 40 MB file that is about
+     * 45 KB/s. What bounds it instead is stalling — a read that waits a minute here,
+     * and `BridgeApi.downloadPhoneInstall`'s own watchdog, which also catches a socket
+     * that never fails a read because it never gets as far as one.
      */
     val download: OkHttpClient = base.newBuilder()
+        .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
-        .callTimeout(15, TimeUnit.MINUTES)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
     fun shutdown() {

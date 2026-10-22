@@ -90,6 +90,7 @@ import com.twentygx.tgxcode.ui.tasks.TasksScreen
 import com.twentygx.tgxcode.ui.settings.AccessDeniedScreen
 import com.twentygx.tgxcode.ui.settings.NotPairedScreen
 import com.twentygx.tgxcode.ui.settings.SettingsScreen
+import com.twentygx.tgxcode.ui.installs.InstallsScreen
 import com.twentygx.tgxcode.ui.schedules.SchedulesScreen
 import com.twentygx.tgxcode.ui.snippets.SnippetsScreen
 import com.twentygx.tgxcode.ui.status.NotificationsScreen
@@ -106,6 +107,7 @@ import kotlinx.serialization.Serializable
 @Serializable object Notifications
 @Serializable object Schedules
 @Serializable object Snippets
+@Serializable object Installs
 @Serializable data class Conversation(val sessionId: String)
 @Serializable data class Subagent(val sessionId: String, val toolUseId: String)
 
@@ -115,7 +117,9 @@ fun TgxCodeRoot(
     vm: AppViewModel,
     deepLinkSessionId: String? = null,
     pairingLink: String? = null,
+    openInstalls: Boolean = false,
     onDeepLinkHandled: () -> Unit = {},
+    onInstallsHandled: () -> Unit = {},
     onPairingHandled: () -> Unit = {},
     onStayConnected: (Boolean) -> Unit = {},
 ) {
@@ -203,6 +207,14 @@ fun TgxCodeRoot(
         }
     }
 
+    // From an install notification: what happened to the APK the desktop sent.
+    LaunchedEffect(openInstalls) {
+        if (openInstalls) {
+            nav.navigate(Installs) { launchSingleTop = true }
+            onInstallsHandled()
+        }
+    }
+
     // A pairing link is filled into the form and the form is shown — never applied
     // silently. The origin is what decides where a token gets sent, so the user
     // should see it before it is trusted.
@@ -222,10 +234,12 @@ fun TgxCodeRoot(
     val onSubagent = destination?.hasRoute(Subagent::class) == true
     val onSchedules = destination?.hasRoute(Schedules::class) == true
     val onSnippets = destination?.hasRoute(Snippets::class) == true
+    val onInstalls = destination?.hasRoute(Installs::class) == true
     val onTasks = destination?.hasRoute(Tasks::class) == true
     // Hidden on a conversation, exactly like mobile.css hides the tab bar there —
     // one screen at a time is the whole shape of this surface.
-    val pushed = onConversation || onSettings || onNotifications || onSubagent || onSchedules || onSnippets
+    val pushed = onConversation || onSettings || onNotifications || onSubagent || onSchedules || onSnippets ||
+        onInstalls
     val showTabs = !pushed
 
     val title = when {
@@ -236,6 +250,7 @@ fun TgxCodeRoot(
         onSubagent -> agentView?.title ?: "Subagent"
         onSchedules -> "Schedules"
         onSnippets -> "Snippets"
+        onInstalls -> "Phone installs"
         destination?.hasRoute(Tasks::class) == true -> "Tasks"
         destination?.hasRoute(NewSession::class) == true -> "Start a session"
         else -> "Sessions"
@@ -742,6 +757,18 @@ fun TgxCodeRoot(
                             onInstallAppsChanged = vm::setInstallApps,
                             onGrantInstallPermission = vm::grantInstallPermission,
                             onOpenSnippets = { nav.navigate(Snippets) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },
+                            onOpenInstalls = { nav.navigate(Installs) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },
+                        )
+                    }
+                    composable<Installs> {
+                        val installs by vm.phoneInstalls.records.collectAsStateWithLifecycle()
+                        val retrying by vm.retryingInstalls.collectAsStateWithLifecycle()
+                        LaunchedEffect(Unit) { vm.refreshInstalls() }
+                        InstallsScreen(
+                            records = installs,
+                            now = now,
+                            retrying = retrying,
+                            onRetry = vm::retryInstall,
                         )
                     }
                 }
