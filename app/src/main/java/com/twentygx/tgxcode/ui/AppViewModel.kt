@@ -46,6 +46,14 @@ class AppViewModel(
 
     val repo: BridgeRepository = container.repository
     val status = container.status
+    val workspace = container.workspace
+
+    /** For the one-off reads the files sheet makes; nothing about them is held. */
+    val api = container.api
+
+    /** Slash commands for the open session, read on its first `/`. */
+    private val _slash = MutableStateFlow<List<com.twentygx.tgxcode.data.model.SlashCommandInfo>>(emptyList())
+    val slash: StateFlow<List<com.twentygx.tgxcode.data.model.SlashCommandInfo>> = _slash.asStateFlow()
     val settings: SettingsStore = container.settings
 
     /**
@@ -220,6 +228,7 @@ class AppViewModel(
     fun open(sessionId: String) = viewModelScope.launch {
         expandedTools.clear()
         _draft.value = ""
+        _slash.value = emptyList()
         // A branch was about the session it was armed on, and would be a surprise
         // waiting on the next one opened.
         if (_branch.value?.sessionId != sessionId) _branch.value = null
@@ -371,6 +380,82 @@ class AppViewModel(
         val stalled = repo.conversation.value
             ?.takeIf { it.sessionId == sessionId }?.runner?.stalled == true
         repo.stop(sessionId, hard = stalled)
+    }
+
+    /**
+     * A snippet that sends itself: straight to the session, leaving the box — and
+     * whatever is half-typed in it — exactly as it was.
+     *
+     * @param snippetMode the snippet's own mode, or null to keep the session's.
+     */
+    fun sendCanned(sessionId: String, text: String, snippetMode: String?) = viewModelScope.launch {
+        if (text.isBlank()) return@launch
+        snippetMode?.let { setMode(sessionId, it) }
+        repo.send(
+            sessionId = sessionId,
+            text = text,
+            mode = modeFor(sessionId),
+            model = modelFor(sessionId),
+            effort = effortFor(sessionId),
+        )
+        picks.intValue++
+    }
+
+    /** Hold what is in the box and deliver it at [at], in [mode]. The box empties only if it was written. */
+    fun scheduleSend(sessionId: String, at: Long, mode: String) = viewModelScope.launch {
+        val text = _draft.value.trim()
+        if (text.isEmpty()) return@launch
+        val written = workspace.scheduleMessage(
+            sessionId,
+            com.twentygx.tgxcode.data.model.LaterCreate(
+                text = text,
+                permissionMode = mode,
+                at = at,
+                model = modelFor(sessionId).ifBlank { null },
+                effort = effortFor(sessionId).ifBlank { null },
+            ),
+        )
+        if (written && _draft.value.trim() == text) _draft.value = ""
+    }
+
+    fun rescheduleMessage(id: String, at: Long) = viewModelScope.launch {
+        workspace.rescheduleMessage(id, com.twentygx.tgxcode.data.model.LaterPatch(at = at))
+    }
+
+    fun loadSlashCommands(sessionId: String) = viewModelScope.launch {
+        if (_slash.value.isNotEmpty()) return@launch
+        _slash.value = workspace.slashCommands(sessionId, null)
+    }
+
+    // -------------------------------------------------------------- schedules
+
+    /** Only `enabled` is sent, so pausing a `dontAsk` schedule from a phone is allowed. */
+    fun setScheduleEnabled(schedule: com.twentygx.tgxcode.data.model.Schedule, on: Boolean) = viewModelScope.launch {
+        workspace.saveSchedule(
+            schedule.id,
+            kotlinx.serialization.json.buildJsonObject { put("enabled", kotlinx.serialization.json.JsonPrimitive(on)) },
+        )
+    }
+
+    fun saveSchedule(id: String?, body: kotlinx.serialization.json.JsonObject, onSaved: () -> Unit) = viewModelScope.launch {
+        if (workspace.saveSchedule(id, body) != null) onSaved()
+    }
+
+    fun runSchedule(schedule: com.twentygx.tgxcode.data.model.Schedule, onStarted: (String) -> Unit) = viewModelScope.launch {
+        workspace.runSchedule(schedule.id)?.let { id ->
+            justCreated = id
+            onStarted(id)
+        }
+    }
+
+    // --------------------------------------------------------------- snippets
+
+    fun saveSnippet(id: String?, body: kotlinx.serialization.json.JsonObject, onSaved: () -> Unit) = viewModelScope.launch {
+        if (workspace.saveSnippet(id, body) != null) onSaved()
+    }
+
+    fun saveSnippetGroup(id: String?, name: String, accent: String?) = viewModelScope.launch {
+        workspace.saveGroup(id, name, accent)
     }
 
     // ------------------------------------------------------------ edit & branch

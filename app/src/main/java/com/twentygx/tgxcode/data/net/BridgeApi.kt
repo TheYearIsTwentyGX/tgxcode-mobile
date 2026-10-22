@@ -10,7 +10,25 @@ import com.twentygx.tgxcode.data.model.DraftResponse
 import com.twentygx.tgxcode.data.model.DraftsResponse
 import com.twentygx.tgxcode.data.model.FlagsRequest
 import com.twentygx.tgxcode.data.model.FlagsResponse
+import com.twentygx.tgxcode.data.model.Changes
+import com.twentygx.tgxcode.data.model.CronDescription
+import com.twentygx.tgxcode.data.model.FileDiff
 import com.twentygx.tgxcode.data.model.Health
+import com.twentygx.tgxcode.data.model.LaterCreate
+import com.twentygx.tgxcode.data.model.LaterPatch
+import com.twentygx.tgxcode.data.model.LaterPayload
+import com.twentygx.tgxcode.data.model.LaterResponse
+import com.twentygx.tgxcode.data.model.ScheduleResponse
+import com.twentygx.tgxcode.data.model.ScheduleRunResponse
+import com.twentygx.tgxcode.data.model.SchedulesPayload
+import com.twentygx.tgxcode.data.model.ScratchFileContent
+import com.twentygx.tgxcode.data.model.Scratchpad
+import com.twentygx.tgxcode.data.model.SlashCommandsResponse
+import com.twentygx.tgxcode.data.model.SnippetGroupBody
+import com.twentygx.tgxcode.data.model.SnippetGroupResponse
+import com.twentygx.tgxcode.data.model.SnippetReorder
+import com.twentygx.tgxcode.data.model.SnippetResponse
+import com.twentygx.tgxcode.data.model.SnippetsPayload
 import com.twentygx.tgxcode.data.model.MarkReadRequest
 import com.twentygx.tgxcode.data.model.MarkReadResponse
 import com.twentygx.tgxcode.data.model.NotificationsResponse
@@ -208,7 +226,109 @@ class BridgeApi(
     suspend fun notifications(scope: String = "notable", limit: Int = 200): ApiResult<NotificationsResponse> =
         get("api/notifications", serializer(), "scope" to scope, "limit" to limit.toString())
 
+    /** Shells out to `git status` behind a 15s cache; `refresh` drops it for this directory. */
+    suspend fun changes(sessionId: String, refresh: Boolean = false): ApiResult<Changes> =
+        get(
+            "api/sessions/${sessionId.encoded()}/changes",
+            serializer(),
+            "refresh" to if (refresh) "1" else null,
+        )
+
+    /** @param mode `worktree` (the default), `staged` or `unstaged`. */
+    suspend fun diff(sessionId: String, path: String, mode: String? = null): ApiResult<FileDiff> =
+        get(
+            "api/sessions/${sessionId.encoded()}/diff",
+            serializer(),
+            "path" to path,
+            "mode" to mode,
+        )
+
+    suspend fun scratchpad(sessionId: String): ApiResult<Scratchpad> =
+        get("api/sessions/${sessionId.encoded()}/scratchpad", serializer())
+
+    suspend fun scratchFile(sessionId: String, dir: String, path: String): ApiResult<ScratchFileContent> =
+        get(
+            "api/sessions/${sessionId.encoded()}/scratchpad/file",
+            serializer(),
+            "dir" to dir,
+            "path" to path,
+        )
+
+    /** Read once; `later-changed` carries the whole payload after that. */
+    suspend fun later(): ApiResult<LaterPayload> = get("api/later", serializer())
+
+    /** Unfiltered: the event that follows is never filtered, so the first read is not either. */
+    suspend fun snippets(): ApiResult<SnippetsPayload> = get("api/snippets", serializer())
+
+    suspend fun schedules(): ApiResult<SchedulesPayload> = get("api/schedules", serializer())
+
+    /** The bridge's English for a cron expression — never a second parser in a client. */
+    suspend fun describeCron(cron: String, once: Boolean = false): ApiResult<CronDescription> =
+        get("api/schedules/describe", serializer(), "cron" to cron, "once" to if (once) "1" else null)
+
+    suspend fun slashCommands(sessionId: String? = null, cwd: String? = null): ApiResult<SlashCommandsResponse> =
+        get("api/slash-commands", serializer(), "session" to sessionId, "cwd" to cwd)
+
     // ---------------------------------------------------------------- writing
+
+    /** `permissionMode` and `at` are required; `at` in the future and within 30 days. */
+    suspend fun createLater(sessionId: String, body: LaterCreate): ApiResult<LaterResponse> =
+        post("api/sessions/${sessionId.encoded()}/later", body, serializer())
+
+    /** `409` once it is no longer pending — editing a sent message would be editing the past. */
+    suspend fun patchLater(id: String, body: LaterPatch): ApiResult<LaterResponse> =
+        patch("api/later/${id.encoded()}", body, serializer())
+
+    /** The only way to cancel one: there is no `cancelled` state. */
+    suspend fun deleteLater(id: String): ApiResult<JsonObject> =
+        delete("api/later/${id.encoded()}", serializer())
+
+    suspend fun sendLaterNow(id: String): ApiResult<JsonObject> =
+        post("api/later/${id.encoded()}/send", JsonObject(emptyMap()), serializer())
+
+    /**
+     * Built as JSON by the caller, like [createSchedule]: on a PATCH `null` is a value
+     * (`groupId: null` ungroups, `permissionMode: null` is inherit) and absence is not,
+     * and a data class under `explicitNulls = false` can only say the second.
+     */
+    suspend fun createSnippet(body: JsonObject): ApiResult<SnippetResponse> =
+        post("api/snippets", body, serializer())
+
+    suspend fun patchSnippet(id: String, body: JsonObject): ApiResult<SnippetResponse> =
+        patch("api/snippets/${id.encoded()}", body, serializer())
+
+    suspend fun deleteSnippet(id: String): ApiResult<JsonObject> =
+        delete("api/snippets/${id.encoded()}", serializer())
+
+    suspend fun reorderSnippets(body: SnippetReorder): ApiResult<SnippetsPayload> =
+        post("api/snippets/reorder", body, serializer())
+
+    suspend fun createSnippetGroup(body: SnippetGroupBody): ApiResult<SnippetGroupResponse> =
+        post("api/snippet-groups", body, serializer())
+
+    suspend fun patchSnippetGroup(id: String, body: SnippetGroupBody): ApiResult<SnippetGroupResponse> =
+        patch("api/snippet-groups/${id.encoded()}", body, serializer())
+
+    suspend fun deleteSnippetGroup(id: String): ApiResult<JsonObject> =
+        delete("api/snippet-groups/${id.encoded()}", serializer())
+
+    /**
+     * A genuine partial, built by the caller as JSON so only the fields that changed
+     * are sent — a schedule in `dontAsk` can still be paused from a phone, but a body
+     * that restated its mode would be refused.
+     */
+    suspend fun createSchedule(body: JsonObject): ApiResult<ScheduleResponse> =
+        post("api/schedules", body, serializer())
+
+    suspend fun patchSchedule(id: String, body: JsonObject): ApiResult<ScheduleResponse> =
+        patch("api/schedules/${id.encoded()}", body, serializer())
+
+    suspend fun deleteSchedule(id: String): ApiResult<JsonObject> =
+        delete("api/schedules/${id.encoded()}", serializer())
+
+    /** The gate is skipped and tonight's slot left alone; the mode refusal still applies. */
+    suspend fun runSchedule(id: String): ApiResult<ScheduleRunResponse> =
+        post("api/schedules/${id.encoded()}/run", JsonObject(emptyMap()), serializer())
 
     /**
      * Run the beacon now. A `409` carries the payload too (`needsSetup` or `running`),

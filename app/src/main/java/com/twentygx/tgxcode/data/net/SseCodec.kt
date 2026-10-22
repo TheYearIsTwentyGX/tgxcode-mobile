@@ -2,6 +2,9 @@ package com.twentygx.tgxcode.data.net
 
 import com.twentygx.tgxcode.core.AppJson
 import com.twentygx.tgxcode.data.model.Ask
+import com.twentygx.tgxcode.data.model.LaterPayload
+import com.twentygx.tgxcode.data.model.SchedulesPayload
+import com.twentygx.tgxcode.data.model.SnippetsPayload
 import com.twentygx.tgxcode.data.model.NotificationRow
 import com.twentygx.tgxcode.data.model.Quota
 import com.twentygx.tgxcode.data.model.TaskList
@@ -46,6 +49,13 @@ object SseCodec {
             StreamEvent.TaskListChanged(AppJson.decodeFromString(serializer<TaskList>(), data))
         "quota" ->
             StreamEvent.QuotaChanged(AppJson.decodeFromString(serializer<Quota>(), data))
+        "later-changed" ->
+            StreamEvent.LaterChanged(AppJson.decodeFromString(serializer<LaterPayload>(), data))
+        "snippets-changed" ->
+            StreamEvent.SnippetsChanged(AppJson.decodeFromString(serializer<SnippetsPayload>(), data))
+        "schedules-changed" ->
+            StreamEvent.SchedulesChanged(AppJson.decodeFromString(serializer<SchedulesPayload>(), data))
+        "slash-commands" -> AppJson.decodeFromString<StreamEvent.SlashCommandsChanged>(data)
         "notification" ->
             StreamEvent.NotificationFiled(AppJson.decodeFromString(serializer<NotificationRow>(), data))
 

@@ -191,4 +191,20 @@ sealed interface StreamEvent {
 
     @Serializable
     data class NotificationsCleared(val at: Long? = null) : StreamEvent
+
+    /** The whole `GET /api/later` payload; also fires on deliveries nobody pressed. */
+    @Serializable
+    data class LaterChanged(val payload: LaterPayload) : StreamEvent
+
+    /** The whole `GET /api/snippets` payload, **unfiltered** by cwd. */
+    @Serializable
+    data class SnippetsChanged(val payload: SnippetsPayload) : StreamEvent
+
+    /** The whole `GET /api/schedules` payload; moves on its own as schedules fire. */
+    @Serializable
+    data class SchedulesChanged(val payload: SchedulesPayload) : StreamEvent
+
+    /** That directory's slash commands changed; drop what was cached. */
+    @Serializable
+    data class SlashCommandsChanged(val cwd: String? = null, val at: Long? = null) : StreamEvent
 }
