@@ -126,6 +126,16 @@ class BridgeClients(tokenProvider: () -> String?) {
         .callTimeout(8, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * Attachment uploads. Up to 10MB over whatever the phone has, which the 20s write
+     * and 30s whole-call bounds above would cut off on a weak cell link; a stuck upload
+     * is still a failed chip with a Retry, never a spinner forever.
+     */
+    val upload: OkHttpClient = base.newBuilder()
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
+        .build()
+
     fun shutdown() {
         base.dispatcher.executorService.shutdown()
         base.connectionPool.evictAll()

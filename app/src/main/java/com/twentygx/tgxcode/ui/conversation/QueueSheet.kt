@@ -59,12 +59,15 @@ fun QueueSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            message.text.orEmpty().ifBlank { "(attachments only)" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        if (!message.text.isNullOrBlank() || message.attachments.isEmpty()) {
+                            Text(
+                                message.text.orEmpty(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        AttachmentNames(message.attachments)
                         if (message.handed) {
                             Text(
                                 "Handed to the running turn",

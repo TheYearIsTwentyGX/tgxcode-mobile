@@ -5,6 +5,15 @@ import androidx.compose.runtime.mutableStateSetOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import android.net.Uri
+import com.twentygx.tgxcode.data.attach.MAX_ATTACHMENTS
+import com.twentygx.tgxcode.data.attach.MAX_ATTACHMENT_BYTES
+import com.twentygx.tgxcode.data.attach.StageState
+import com.twentygx.tgxcode.data.attach.StagedFile
+import com.twentygx.tgxcode.data.attach.UploadTarget
+import com.twentygx.tgxcode.data.attach.canSendWith
+import com.twentygx.tgxcode.data.attach.readyRefs
+import com.twentygx.tgxcode.data.attach.tooBig
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.Draft
 import com.twentygx.tgxcode.data.model.DraftBody
@@ -69,6 +78,16 @@ class AppViewModel(
 
     private val _sending = MutableStateFlow(false)
     val sending: StateFlow<Boolean> = _sending.asStateFlow()
+
+    /**
+     * The composer's files, for the session it is open on. Emptied on [open] like
+     * [draft]; each is uploaded the moment it is picked, as on the desktop, so a send
+     * is a small JSON POST naming files already on disk.
+     */
+    private val _staged = MutableStateFlow<List<StagedFile>>(emptyList())
+    val staged: StateFlow<List<StagedFile>> = _staged.asStateFlow()
+
+    private var nextStagedId = 0L
 
     private val _answering = MutableStateFlow<Set<String>>(emptySet())
     val answering: StateFlow<Set<String>> = _answering.asStateFlow()
@@ -228,6 +247,9 @@ class AppViewModel(
     fun open(sessionId: String) = viewModelScope.launch {
         expandedTools.clear()
         _draft.value = ""
+        // An upload still in flight for the last session lands nowhere: its chip's id
+        // is gone from this list, and the file it wrote is harmless on disk.
+        _staged.value = emptyList()
         _slash.value = emptyList()
         // A branch was about the session it was armed on, and would be a surprise
         // waiting on the next one opened.
@@ -320,20 +342,25 @@ class AppViewModel(
     fun send(sessionId: String, mode: String, onNewSession: (String) -> Unit = {}) =
         viewModelScope.launch {
             val text = _draft.value.trim()
-            if (text.isEmpty()) return@launch
+            val files = _staged.value
+            if (!canSendWith(text, files, sending = false)) return@launch
+            val refs = files.readyRefs()
             val branch = _branch.value?.takeIf { it.sessionId == sessionId }
             _sending.value = true
             // Cleared optimistically: the transcript is the record, and holding text in
             // the box after it is already sent invites sending it twice.
             _draft.value = ""
+            _staged.value = emptyList()
 
             if (branch?.first == true) {
                 val open = repo.conversation.value?.takeIf { it.sessionId == sessionId }
                 val cwd = open?.summary?.cwd
                 if (cwd == null) {
-                    _draft.value = text
+                    restoreComposer(text, files)
                     repo.report("That session has no folder to start in", isError = true)
                 } else {
+                    // Same folder, so the same attached_assets: the files uploaded to this
+                    // session resolve for the new one too.
                     repo.createSession(
                         cwd = cwd,
                         prompt = text,
@@ -341,12 +368,13 @@ class AppViewModel(
                         test = open.summary.test,
                         model = modelFor(sessionId),
                         effort = effortFor(sessionId),
+                        attachments = refs,
                     ).onSuccess { id ->
                         _branch.value = null
                         justCreated = id
                         onNewSession(id)
                     }.onFailure { error ->
-                        _draft.value = text
+                        restoreComposer(text, files)
                         repo.report("Could not start it: ${error.message}", isError = true)
                     }
                 }
@@ -361,9 +389,10 @@ class AppViewModel(
                 model = modelFor(sessionId),
                 effort = effortFor(sessionId),
                 fromUuid = branch?.uuid,
+                attachments = refs,
             )
             if (restored != null) {
-                _draft.value = restored
+                restoreComposer(restored, files)
             } else {
                 // Sent: the copy is being made, and `session-forked` takes us there.
                 if (branch != null) _branch.value = null
@@ -371,6 +400,75 @@ class AppViewModel(
             }
             _sending.value = false
         }
+
+    /** Put a message that did not go back in the box, files and all, ahead of anything picked since. */
+    private fun restoreComposer(text: String, files: List<StagedFile>) {
+        _draft.value = text
+        _staged.value = files + _staged.value
+    }
+
+    /** Stage what the picker returned and start uploading each to [sessionId]. */
+    fun attach(sessionId: String, uris: List<Uri>) {
+        val added = stage(uris, already = _staged.value.size, state = StageState.Uploading)
+        if (added.isEmpty()) return
+        _staged.value = _staged.value + added
+        added.forEach { upload(UploadTarget.Session(sessionId), it, ::updateStaged) }
+    }
+
+    fun retryStaged(sessionId: String, id: Long) {
+        val file = _staged.value.firstOrNull { it.id == id } ?: return
+        updateStaged { list -> list.map { if (it.id == id) it.copy(state = StageState.Uploading) else it } }
+        upload(UploadTarget.Session(sessionId), file, ::updateStaged)
+    }
+
+    /** Off the message only; the bridge never deletes, and the file stays on disk. */
+    fun unstage(id: Long) = updateStaged { list -> list.filterNot { it.id == id } }
+
+    private fun updateStaged(change: (List<StagedFile>) -> List<StagedFile>) {
+        _staged.value = change(_staged.value)
+    }
+
+    /**
+     * Picked URIs as chips, after the two checks that need no bytes: the per-message
+     * count, and the size of anything that is not a photo (a photo is scaled down
+     * before it goes, so its size as picked says nothing about whether it fits).
+     */
+    private fun stage(uris: List<Uri>, already: Int, state: StageState): List<StagedFile> {
+        val room = (MAX_ATTACHMENTS - already).coerceAtLeast(0)
+        if (uris.size > room) {
+            viewModelScope.launch { repo.report("At most $MAX_ATTACHMENTS files per message", isError = true) }
+        }
+        return uris.take(room).mapNotNull { uri ->
+            val picked = container.attachmentSource.describe(uri)
+            if (!picked.isImage && (picked.size ?: 0) > MAX_ATTACHMENT_BYTES) {
+                viewModelScope.launch { repo.report(tooBig(picked.name), isError = true) }
+                return@mapNotNull null
+            }
+            StagedFile(
+                id = nextStagedId++,
+                uri = uri.toString(),
+                name = picked.name,
+                size = picked.size,
+                mediaType = picked.mediaType,
+                state = state,
+            )
+        }
+    }
+
+    /** Upload one chip and move it to Ready or Failed — by id, so a removed chip stays removed. */
+    private fun upload(
+        target: UploadTarget,
+        file: StagedFile,
+        update: ((List<StagedFile>) -> List<StagedFile>) -> Unit,
+    ) = viewModelScope.launch {
+        val result = container.uploader.upload(target, file.picked())
+        update { list ->
+            list.map {
+                if (it.id != file.id) it
+                else it.copy(state = result, name = (result as? StageState.Ready)?.ref?.name ?: it.name)
+            }
+        }
+    }
 
     /**
      * A stalled turn gets a hard stop, as on the desktop: a process that has gone
@@ -404,7 +502,8 @@ class AppViewModel(
     /** Hold what is in the box and deliver it at [at], in [mode]. The box empties only if it was written. */
     fun scheduleSend(sessionId: String, at: Long, mode: String) = viewModelScope.launch {
         val text = _draft.value.trim()
-        if (text.isEmpty()) return@launch
+        val files = _staged.value
+        if (!canSendWith(text, files, sending = false)) return@launch
         val written = workspace.scheduleMessage(
             sessionId,
             com.twentygx.tgxcode.data.model.LaterCreate(
@@ -413,9 +512,11 @@ class AppViewModel(
                 at = at,
                 model = modelFor(sessionId).ifBlank { null },
                 effort = effortFor(sessionId).ifBlank { null },
+                attachments = files.readyRefs().takeIf { it.isNotEmpty() },
             ),
         )
         if (written && _draft.value.trim() == text) _draft.value = ""
+        if (written) _staged.value = _staged.value.filterNot { staged -> files.any { it.id == staged.id } }
     }
 
     fun rescheduleMessage(id: String, at: Long) = viewModelScope.launch {
@@ -633,7 +734,27 @@ class AppViewModel(
 
     // ------------------------------------------------------------ new session
 
-    fun setNewCwd(cwd: String) { _newSession.value = _newSession.value.copy(cwd = cwd) }
+    fun setNewCwd(cwd: String) {
+        val state = _newSession.value
+        // A file already uploaded went into the old folder's attached_assets, which the
+        // new folder's session would not resolve; hold it again so Start re-sends it.
+        val files = if (cwd == state.cwd) state.attachments
+        else state.attachments.map { if (it.state is StageState.Ready) it.copy(state = StageState.Held) else it }
+        _newSession.value = state.copy(cwd = cwd, attachments = files)
+    }
+
+    /** Held, not uploaded: there is no session yet, and the folder can still change. */
+    fun attachNew(uris: List<Uri>) {
+        val state = _newSession.value
+        val added = stage(uris, already = state.attachments.size, state = StageState.Held)
+        _newSession.value = state.copy(attachments = state.attachments + added, error = null)
+    }
+
+    fun unstageNew(id: Long) = updateNew { list -> list.filterNot { it.id == id } }
+
+    private fun updateNew(change: (List<StagedFile>) -> List<StagedFile>) {
+        _newSession.value = _newSession.value.copy(attachments = change(_newSession.value.attachments))
+    }
     fun setNewMode(mode: String) { _newSession.value = _newSession.value.copy(mode = mode) }
     fun setNewModel(model: String) { _newSession.value = _newSession.value.copy(model = model) }
     fun setNewEffort(effort: String) { _newSession.value = _newSession.value.copy(effort = effort) }
@@ -648,18 +769,39 @@ class AppViewModel(
             return@launch
         }
         _newSession.value = state.copy(starting = true, error = null)
+
+        // Upload, then create — the order the bridge asks for. One at a time, and a
+        // failure stops the start: a session begun without a file its first message
+        // talks about is worse than one not begun yet.
+        val cwd = state.cwd.orEmpty()
+        for (file in state.attachments.filter { it.state !is StageState.Ready }) {
+            updateNew { list -> list.map { if (it.id == file.id) it.copy(state = StageState.Uploading) else it } }
+            upload(UploadTarget.Folder(cwd), file, ::updateNew).join()
+        }
+        val files = _newSession.value.attachments
+        val failed = files.firstOrNull { it.state is StageState.Failed }
+        if (failed != null) {
+            _newSession.value = _newSession.value.copy(
+                starting = false,
+                error = "${failed.name}: ${(failed.state as StageState.Failed).reason}",
+            )
+            return@launch
+        }
+
         repo.createSession(
-            cwd = state.cwd.orEmpty(),
+            cwd = cwd,
             prompt = state.prompt.trim(),
             mode = state.mode,
             test = state.test,
             model = state.model,
             effort = state.effort,
+            attachments = files.readyRefs(),
         )
             .onSuccess { id ->
                 _newSession.value = _newSession.value.copy(
                     starting = false,
                     prompt = "",
+                    attachments = emptyList(),
                     editingDraftId = null,
                 )
                 justCreated = id
@@ -816,6 +958,7 @@ class AppViewModel(
     fun saveDraft() = viewModelScope.launch {
         val state = _newSession.value
         val invalid = state.validate()
+            ?: "A draft cannot hold files. Remove them, or Start it now.".takeIf { state.attachments.isNotEmpty() }
         if (invalid != null) {
             _newSession.value = state.copy(error = invalid)
             return@launch
@@ -915,6 +1058,8 @@ data class NewSessionUiState(
     val effort: String = "",
     val prompt: String = "",
     val test: Boolean = false,
+    /** Held until Start, then uploaded to [cwd]. Drafts cannot carry them. */
+    val attachments: List<StagedFile> = emptyList(),
     val starting: Boolean = false,
     val error: String? = null,
     /** Set while the form is showing a saved draft rather than a blank session. */
@@ -926,7 +1071,7 @@ data class NewSessionUiState(
     /** The one set of rules, so Start and Save cannot come to different verdicts. */
     fun validate(): String? = when {
         cwd.isNullOrBlank() -> "Pick a directory first."
-        prompt.isBlank() -> "A session needs a first message."
+        prompt.isBlank() && attachments.isEmpty() -> "A session needs a first message."
         else -> null
     }
 

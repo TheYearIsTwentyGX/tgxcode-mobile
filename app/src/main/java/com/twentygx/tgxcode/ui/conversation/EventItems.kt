@@ -165,7 +165,7 @@ fun EventItem(
 
 /**
  * A blue bubble, indented from the left, with one flat corner pointing at the
- * sender. Text is pre-wrapped; images are counted, never shown.
+ * sender. Text is pre-wrapped; attached images are drawn under it, files listed.
  */
 @Composable
 private fun UserBubble(
@@ -199,15 +199,13 @@ private fun UserBubble(
                     .background(tgx.blueCont, UserBubbleShape)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
-                Text(text, style = MaterialTheme.typography.bodyMedium)
-                if (event.images.isNotEmpty()) {
-                    Text(
-                        "${event.images.size} image${if (event.images.size == 1) "" else "s"}",
-                        style = TgxType.mono12,
-                        color = tgx.textFaint,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
+                // Empty for a message that was only files.
+                if (text.isNotEmpty()) Text(text, style = MaterialTheme.typography.bodyMedium)
+                MessageAttachments(
+                    images = event.images,
+                    files = event.files,
+                    modifier = if (text.isNotEmpty()) Modifier.padding(top = 6.dp) else Modifier,
+                )
             }
         }
     }

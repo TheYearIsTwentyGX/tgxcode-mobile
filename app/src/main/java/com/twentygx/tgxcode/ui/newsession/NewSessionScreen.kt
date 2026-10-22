@@ -45,6 +45,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.net.Uri
+import com.twentygx.tgxcode.data.attach.MAX_ATTACHMENTS
+import com.twentygx.tgxcode.data.attach.StagedFile
+import com.twentygx.tgxcode.ui.conversation.AttachButton
+import com.twentygx.tgxcode.ui.conversation.AttachmentStrip
 import com.twentygx.tgxcode.core.ago
 import com.twentygx.tgxcode.data.model.Draft
 import com.twentygx.tgxcode.data.model.SessionChoices
@@ -152,6 +157,9 @@ fun NewSessionScreen(
     onPromptChanged: (String) -> Unit,
     test: Boolean,
     onTestChanged: (Boolean) -> Unit,
+    attachments: List<StagedFile>,
+    onAttach: (List<Uri>) -> Unit,
+    onRemoveAttachment: (Long) -> Unit,
     starting: Boolean,
     savingDraft: Boolean,
     error: String?,
@@ -191,7 +199,7 @@ fun NewSessionScreen(
     }
 
     val busy = starting || savingDraft
-    val ready = !cwd.isNullOrBlank() && prompt.isNotBlank()
+    val ready = !cwd.isNullOrBlank() && (prompt.isNotBlank() || attachments.isNotEmpty())
 
     Column(
         modifier
@@ -305,6 +313,26 @@ fun NewSessionScreen(
             placeholder = { Text("What should it do?") },
             textStyle = MaterialTheme.typography.bodyMedium,
         )
+
+        // Held until Start, which uploads them into the folder picked above and only
+        // then creates the session — so changing the folder first is harmless.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AttachButton(
+                remaining = MAX_ATTACHMENTS - attachments.size,
+                onPicked = onAttach,
+                enabled = !busy,
+            )
+            if (attachments.isEmpty()) {
+                Text("Attach a photo or file", style = MaterialTheme.typography.bodySmall, color = tgx.textFaint)
+            } else {
+                AttachmentStrip(
+                    files = attachments,
+                    onRemove = onRemoveAttachment,
+                    onRetry = null,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = test, onCheckedChange = onTestChanged)

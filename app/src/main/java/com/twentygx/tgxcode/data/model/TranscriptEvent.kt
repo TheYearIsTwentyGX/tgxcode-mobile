@@ -56,7 +56,13 @@ data class UserEvent(
     override val id: String,
     override val ts: String? = null,
     val text: String? = null,
-    val images: List<JsonObject> = emptyList(),
+    /** What the model was sent inline. Usually also in [files], as the file on disk. */
+    val images: List<ImageRef> = emptyList(),
+    /**
+     * Read back off the `Attached files (read them):` note the bridge appends, which it
+     * strips from [text]. Every attachment, image or not.
+     */
+    val files: List<FileRef> = emptyList(),
     val command: SlashCommand? = null,
     /**
      * Claude Code's own `origin.kind`: `human`, `peer`, or an agent type. Not a closed
@@ -392,4 +398,19 @@ data class SuggestionDecision(
     val status: String? = null,
     val startedId: String? = null,
     val at: Long = 0,
+)
+
+/** One inline image block. [dataUri] is null when the bridge could not read it back. */
+@Serializable
+data class ImageRef(
+    val mediaType: String? = null,
+    val dataUri: String? = null,
+)
+
+/** One attached file. [size] is a display string (`"412 KB"`), not a number. */
+@Serializable
+data class FileRef(
+    val relPath: String? = null,
+    val name: String? = null,
+    val size: String? = null,
 )

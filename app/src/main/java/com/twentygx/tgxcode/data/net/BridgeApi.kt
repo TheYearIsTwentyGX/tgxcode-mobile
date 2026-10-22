@@ -56,6 +56,7 @@ import com.twentygx.tgxcode.data.model.SubscribeRequest
 import com.twentygx.tgxcode.data.model.SuggestionActRequest
 import com.twentygx.tgxcode.data.model.SuggestionsResponse
 import com.twentygx.tgxcode.data.model.TaskStatus
+import com.twentygx.tgxcode.data.model.UploadedAttachment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
@@ -63,6 +64,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -357,6 +359,31 @@ class BridgeApi(
         post("api/sessions/${sessionId.encoded()}/send", body, serializer())
 
     /**
+     * Raw bytes, one file per request — not JSON, so the bridge's cap is about the
+     * file. [contentType] is only a hint: the bridge sniffs images from the bytes.
+     * `413` is the cap (10MB from a phone), `400` an empty file or a name it refuses.
+     */
+    suspend fun uploadAttachment(
+        sessionId: String,
+        name: String,
+        bytes: ByteArray,
+        contentType: String,
+    ): ApiResult<UploadedAttachment> =
+        postBytes(
+            "api/sessions/${sessionId.encoded()}/attachments", bytes, contentType, serializer(),
+            "name" to name,
+        )
+
+    /** The same upload for a session that does not exist yet: upload, then create. */
+    suspend fun uploadAttachmentTo(
+        cwd: String,
+        name: String,
+        bytes: ByteArray,
+        contentType: String,
+    ): ApiResult<UploadedAttachment> =
+        postBytes("api/attachments", bytes, contentType, serializer(), "cwd" to cwd, "name" to name)
+
+    /**
      * @param hard SIGTERM then SIGKILL rather than asking the CLI to interrupt itself.
      *   What a stalled turn gets: a process that has gone silent is the one least
      *   likely to answer an interrupt.
@@ -472,6 +499,19 @@ class BridgeApi(
         Request.Builder()
             .url(config.url(path))
             .post(json.toRequestBody(JSON_MEDIA))
+            .build()
+    }
+
+    private suspend fun <T> postBytes(
+        path: String,
+        bytes: ByteArray,
+        contentType: String,
+        deserializer: KSerializer<T>,
+        vararg query: Pair<String, String?>,
+    ): ApiResult<T> = execute(deserializer, clients.upload) { config ->
+        Request.Builder()
+            .url(config.url(path, *query))
+            .post(bytes.toRequestBody(contentType.toMediaTypeOrNull()))
             .build()
     }
 

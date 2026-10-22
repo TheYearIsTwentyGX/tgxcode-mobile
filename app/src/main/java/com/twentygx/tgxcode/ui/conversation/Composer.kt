@@ -35,6 +35,11 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.net.Uri
+import com.twentygx.tgxcode.data.attach.MAX_ATTACHMENTS
+import com.twentygx.tgxcode.data.attach.StagedFile
+import com.twentygx.tgxcode.data.attach.canSendWith
+import com.twentygx.tgxcode.data.attach.stagingNote
 import com.twentygx.tgxcode.data.model.RunnerStatus
 import com.twentygx.tgxcode.data.model.SessionChoices
 import com.twentygx.tgxcode.data.model.SlashCommandInfo
@@ -165,6 +170,12 @@ data class ComposerControls(
     val onWantSlashCommands: () -> Unit = {},
     /** Long-press Send: deliver at a time instead. Null where there is nothing to schedule into. */
     val onScheduleSend: ((at: Long, mode: String) -> Unit)? = null,
+    /** Files on the next message, each already uploading or uploaded. */
+    val attachments: List<StagedFile> = emptyList(),
+    /** What the + hands back. Null where nothing can be attached, and the + is not drawn. */
+    val onAttach: ((List<Uri>) -> Unit)? = null,
+    val onRemoveAttachment: (Long) -> Unit = {},
+    val onRetryAttachment: (Long) -> Unit = {},
 )
 
 /**
@@ -248,6 +259,7 @@ fun Composer(
             "held until background work ends: " +
                 "${SessionChoices.label(it.model.orEmpty())} · ${SessionChoices.label(it.effort.orEmpty())}"
         },
+        stagingNote(controls.attachments),
     ).joinToString(" · ")
 
     Column(
@@ -374,7 +386,16 @@ fun Composer(
             }
         }
 
+        AttachmentStrip(
+            files = controls.attachments,
+            onRemove = controls.onRemoveAttachment,
+            onRetry = controls.onRetryAttachment,
+        )
+
         Row(verticalAlignment = Alignment.Bottom) {
+            controls.onAttach?.let { attach ->
+                AttachButton(remaining = MAX_ATTACHMENTS - controls.attachments.size, onPicked = attach)
+            }
             OutlinedTextField(
                 value = field,
                 onValueChange = {
@@ -390,7 +411,7 @@ fun Composer(
             )
             // A Box rather than an IconButton, for the long press: Send later lives
             // there, as on the desktop's send menu, out of the way of the plain tap.
-            val canSend = text.isNotBlank() && !sending
+            val canSend = canSendWith(text, controls.attachments, sending)
             Box(
                 Modifier
                     .padding(start = 8.dp)

@@ -168,6 +168,8 @@ data class CreateSessionRequest(
     val permissionMode: String? = null,
     /** Keeps it out of the everyday window. Use it for anything exploratory. */
     val test: Boolean = false,
+    /** Uploaded through `POST /api/attachments?cwd=` first; [prompt] may then be empty. */
+    val attachments: List<AttachmentRef>? = null,
 )
 
 /**
@@ -212,7 +214,46 @@ data class SendRequest(
      * that turn and [text] takes its place.
      */
     val fromUuid: String? = null,
+    /**
+     * Files already uploaded to this session, at most five. With at least one, [text]
+     * may be empty. The bridge keeps only each path's basename and re-derives the
+     * directory, so a path handed back for the wrong session is dropped, not obeyed.
+     */
+    val attachments: List<AttachmentRef>? = null,
 )
+
+/**
+ * A file the bridge has already written into `attached_assets/`, as a send, a create
+ * or a scheduled message names it. Only [path] is read; the rest rides along so a
+ * later read of the row has something to show.
+ */
+@Serializable
+data class AttachmentRef(
+    val path: String,
+    val relPath: String? = null,
+    val mediaType: String? = null,
+) {
+    /** What a chip or a queue row calls it. */
+    val name: String get() = path.substringAfterLast('/')
+}
+
+/**
+ * What an upload answers. [name] can differ from the one sent: the bridge never
+ * overwrites, so `shot.png` comes back as `shot-2.png` with [renamed] set. [mediaType]
+ * is sniffed from the bytes, not taken from the `Content-Type` the app sent.
+ */
+@Serializable
+data class UploadedAttachment(
+    val ok: Boolean = false,
+    val name: String,
+    val renamed: Boolean = false,
+    val path: String,
+    val relPath: String? = null,
+    val bytes: Long = 0,
+    val mediaType: String? = null,
+) {
+    fun ref(): AttachmentRef = AttachmentRef(path = path, relPath = relPath, mediaType = mediaType)
+}
 
 /** `hard` is SIGTERM then SIGKILL — what a stalled turn gets, since it is the least likely to answer an interrupt. */
 @Serializable

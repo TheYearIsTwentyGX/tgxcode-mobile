@@ -117,6 +117,7 @@ fun TgxCodeRoot(
     val now by vm.now.collectAsStateWithLifecycle()
     val draft by vm.draft.collectAsStateWithLifecycle()
     val sending by vm.sending.collectAsStateWithLifecycle()
+    val staged by vm.staged.collectAsStateWithLifecycle()
     val answering by vm.answering.collectAsStateWithLifecycle()
     val settingsUi by vm.settingsUi.collectAsStateWithLifecycle()
     val newSession by vm.newSession.collectAsStateWithLifecycle()
@@ -453,6 +454,9 @@ fun TgxCodeRoot(
                             onPromptChanged = vm::setNewPrompt,
                             test = newSession.test,
                             onTestChanged = vm::setNewTest,
+                            attachments = newSession.attachments,
+                            onAttach = vm::attachNew,
+                            onRemoveAttachment = vm::unstageNew,
                             starting = newSession.starting,
                             savingDraft = newSession.savingDraft,
                             error = newSession.error,
@@ -515,6 +519,10 @@ fun TgxCodeRoot(
                                 slashCommands = slash,
                                 onWantSlashCommands = { vm.loadSlashCommands(sessionId) },
                                 onScheduleSend = { at, chosen -> vm.scheduleSend(sessionId, at, chosen) },
+                                attachments = staged,
+                                onAttach = { uris -> vm.attach(sessionId, uris) },
+                                onRemoveAttachment = vm::unstage,
+                                onRetryAttachment = { vm.retryStaged(sessionId, it) },
                             ),
                             userActions = remember(sessionId) {
                                 UserTurnActions(
