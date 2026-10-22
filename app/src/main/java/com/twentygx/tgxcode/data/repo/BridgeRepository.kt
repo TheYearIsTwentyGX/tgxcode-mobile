@@ -11,9 +11,11 @@ import com.twentygx.tgxcode.data.model.Decision
 import com.twentygx.tgxcode.data.model.Draft
 import com.twentygx.tgxcode.data.model.DraftBody
 import com.twentygx.tgxcode.data.model.DraftResponse
+import com.twentygx.tgxcode.data.model.FlagsRequest
 import com.twentygx.tgxcode.data.model.Health
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.data.model.PrsPayload
+import com.twentygx.tgxcode.data.model.QueueWriteResponse
 import com.twentygx.tgxcode.data.model.SessionPrsResponse
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.SendRequest
@@ -68,6 +70,29 @@ internal fun openDelta(before: String?, after: String): Int {
 }
 
 /**
+ * The `POST …/send` body, out here so the rules in it can be tested on their own.
+ *
+ * A blank model is left out (absent and null both mean "as you were"); effort is sent
+ * as given, `""` included, because there it is `inherit` and is honoured; and a
+ * `fromUuid` brings `fork` with it, since the bridge refuses one without the other.
+ */
+internal fun sendBody(
+    text: String,
+    mode: String,
+    model: String = "",
+    effort: String? = null,
+    fork: Boolean = false,
+    fromUuid: String? = null,
+): SendRequest = SendRequest(
+    text = text,
+    permissionMode = mode,
+    model = model.takeIf { it.isNotBlank() },
+    effort = effort,
+    fork = (fork || fromUuid != null).takeIf { it },
+    fromUuid = fromUuid,
+)
+
+/**
  * What the connection dot shows.
  *
  * [Polling] is the odd one: it is *working*, but by asking rather than by being told,
@@ -79,6 +104,9 @@ enum class ConnState { Offline, Connecting, Live, Polling, NotPaired, Unconfigur
 
 /** Something worth a toast. */
 data class UserMessage(val text: String, val isError: Boolean = false)
+
+/** Messages that never became a turn, handed back for the composer of [sessionId]. */
+data class Unsent(val sessionId: String, val texts: List<String>, val kind: String? = null)
 
 /** Navigation the *bridge* asked for, not the user. */
 sealed interface NavCommand {
@@ -178,6 +206,14 @@ class BridgeRepository(
     val commands: SharedFlow<NavCommand> = _commands.asSharedFlow()
 
     /**
+     * Text the bridge handed back because it never became a turn — a `send-failed`, or
+     * the messages a stop took off the queue. Keyed by session so the composer only
+     * takes back what was its own.
+     */
+    private val _unsent = MutableSharedFlow<Unsent>(extraBufferCapacity = 8)
+    val unsent: SharedFlow<Unsent> = _unsent.asSharedFlow()
+
+    /**
      * Permission traffic for *every* session, not just the open one.
      *
      * The conversation screen only cares about the session it is showing, but the
@@ -231,6 +267,14 @@ class BridgeRepository(
 
     /** Modes picked but not yet sent, per session. Survives leaving the screen. */
     private val pendingModes = mutableMapOf<String, String>()
+
+    /**
+     * Model and effort picks not yet sent, per session, and for the same reason as
+     * [pendingModes]. `""` is a real pick — `inherit` — so these hold strings rather
+     * than treating empty as unset.
+     */
+    private val pendingModels = mutableMapOf<String, String>()
+    private val pendingEfforts = mutableMapOf<String, String>()
 
     private var clientId: String? = null
     private var streamJob: Job? = null
@@ -749,8 +793,14 @@ class BridgeRepository(
 
             is StreamEvent.SendFailed -> {
                 _messages.emit(
-                    UserMessage(event.message ?: "That message did not send", isError = true),
+                    UserMessage(sendFailedText(event), isError = true),
                 )
+                val id = event.sessionId
+                // A refused branch is told to the composer even with nothing to hand
+                // back: the armed branch has to stand down either way.
+                if (id != null && (event.unsent.isNotEmpty() || event.kind == "branch-refused")) {
+                    _unsent.emit(Unsent(id, event.unsent, event.kind))
+                }
             }
 
             is StreamEvent.AgentTail, is StreamEvent.AgentReset -> Unit
@@ -1199,16 +1249,36 @@ class BridgeRepository(
         pendingModes[sessionId] = mode
     }
 
+    fun pendingModel(sessionId: String): String? = pendingModels[sessionId]
+    fun setPendingModel(sessionId: String, model: String) { pendingModels[sessionId] = model }
+    fun pendingEffort(sessionId: String): String? = pendingEfforts[sessionId]
+    fun setPendingEffort(sessionId: String, effort: String) { pendingEfforts[sessionId] = effort }
+
     /**
+     * @param model `""` for inherit, which on a send is "as you were" — the bridge has
+     *   no way to ask a live process to drop its model — so it is left out.
+     * @param effort always sent: `""` is `inherit` and *is* honoured. See [SendRequest].
+     * @param fromUuid Edit and branch — the turn's own id. Implies [fork].
      * @return the text back if it did not send, so the composer can restore it.
      */
-    suspend fun send(sessionId: String, text: String, mode: String): String? {
+    suspend fun send(
+        sessionId: String,
+        text: String,
+        mode: String,
+        model: String = "",
+        effort: String? = null,
+        fork: Boolean = false,
+        fromUuid: String? = null,
+    ): String? {
         // permissionMode is always sent, never conditionally — an absent one
         // normalises to `auto` server-side, so omitting it would quietly drop a
         // session out of acceptEdits on every message.
-        return when (val result = api.send(sessionId, SendRequest(text = text, permissionMode = mode))) {
+        val body = sendBody(text, mode, model, effort, fork, fromUuid)
+        return when (val result = api.send(sessionId, body)) {
             is ApiResult.Ok -> {
                 pendingModes.remove(sessionId)
+                pendingModels.remove(sessionId)
+                pendingEfforts.remove(sessionId)
                 // The response carries a fresher runner status than the last event
                 // did, so apply it rather than waiting for the stream to catch up.
                 result.value.status?.let { status ->
@@ -1219,22 +1289,176 @@ class BridgeRepository(
                 null
             }
             else -> {
-                _messages.emit(UserMessage("Did not send: ${result.message()}", isError = true))
+                _messages.emit(UserMessage("Did not send: ${sendRefusal(result)}", isError = true))
                 text
             }
         }
     }
 
-    suspend fun stop(sessionId: String) {
-        when (val result = api.stop(sessionId)) {
-            is ApiResult.Ok -> _messages.emit(
-                UserMessage(
-                    if (result.value.how == "hard") "Stopped the process" else "Asked it to stop",
-                ),
-            )
+    /**
+     * The send refusals worth their own sentence — mostly the branch ones, each of
+     * which is a different thing to do next.
+     */
+    private fun sendRefusal(result: ApiResult<*>): String = when {
+        result is ApiResult.Http && result.status == 409 ->
+            "it is working — stop it first, or send without branching."
+        result is ApiResult.Http && result.status == 403 -> "that mode cannot be set from here."
+        else -> result.message()
+    }
+
+    private fun sendFailedText(event: StreamEvent.SendFailed): String = when (event.kind) {
+        "branch-refused" ->
+            "Claude Code would not branch from there. Send it without branching instead."
+        "busy-elsewhere" -> "This session is running somewhere else. Branch off a copy instead."
+        "exited" -> "The process ended without answering."
+        else -> event.message ?: "That message did not send"
+    }
+
+    /**
+     * @param hard what a stalled turn gets — see [BridgeApi.stop].
+     *
+     * Whatever was still queued comes back as `dropped`, and has to be put somewhere or
+     * it is lost — including when `how` is null, which is the case where a session
+     * looked stuck and Stop was the obvious thing to press.
+     */
+    suspend fun stop(sessionId: String, hard: Boolean = false) {
+        when (val result = api.stop(sessionId, hard)) {
+            is ApiResult.Ok -> {
+                val how = result.value.how
+                _messages.emit(
+                    UserMessage(
+                        when (how) {
+                            "hard" -> "Stopped the process"
+                            "soft" -> "Asked it to stop"
+                            else -> "There was nothing running to stop"
+                        },
+                    ),
+                )
+                if (result.value.dropped.isNotEmpty()) {
+                    _unsent.emit(Unsent(sessionId, result.value.dropped))
+                }
+            }
             else -> _messages.emit(
                 UserMessage("Could not stop: ${result.message()}", isError = true),
             )
+        }
+    }
+
+    // ------------------------------------------------------------------ queue
+
+    /**
+     * Drop one queued message. A `409` means it already went — a `handed` one the
+     * running turn read first — and is said as what happened, not as a failure.
+     */
+    suspend fun dropQueued(sessionId: String, queueId: String) {
+        val result = api.dropQueued(sessionId, queueId)
+        if (result is ApiResult.Http && result.status == 409) {
+            _messages.emit(UserMessage("Too late — that one has already gone to the turn"))
+            return
+        }
+        applyQueueWrite(sessionId, result, "Could not drop that message")
+    }
+
+    suspend fun reorderQueue(sessionId: String, ids: List<String>) {
+        applyQueueWrite(sessionId, api.reorderQueue(sessionId, ids), "Could not reorder the queue")
+    }
+
+    /** Every queue write answers with the whole runner, which is what the chips draw from. */
+    private suspend fun applyQueueWrite(
+        sessionId: String,
+        result: ApiResult<QueueWriteResponse>,
+        failure: String,
+    ) {
+        when (result) {
+            is ApiResult.Ok -> result.value.status?.let { status ->
+                currentIf(sessionId)?.let { _conversation.value = it.copy(runner = status) }
+            }
+            else -> _messages.emit(UserMessage("$failure: ${result.message()}", isError = true))
+        }
+    }
+
+    // ------------------------------------------------------------------ flags
+
+    /**
+     * Pin, archive or rename. Applied to the list straight away and confirmed by a
+     * re-read, because `sessions-changed` will say the same a moment later and a row
+     * that sits unchanged for that moment reads as a press that did not land.
+     */
+    suspend fun setFlags(sessionId: String, flags: FlagsRequest): Boolean {
+        val before = _sessions.value
+        _sessions.value = before.map { s ->
+            if (s.sessionId != sessionId) {
+                s
+            } else {
+                s.copy(
+                    pinned = flags.pinned ?: s.pinned,
+                    archived = flags.archived ?: s.archived,
+                    title = flags.title?.takeIf { it.isNotBlank() } ?: s.title,
+                )
+            }
+        }
+        return when (val result = api.setFlags(sessionId, flags)) {
+            is ApiResult.Ok -> {
+                val answer = result.value
+                // `title` in the answer is what the session now *shows* — after a
+                // clear, the transcript's title again — so it is the one to keep.
+                _sessions.value = _sessions.value.map { s ->
+                    if (s.sessionId != sessionId) {
+                        s
+                    } else {
+                        s.copy(
+                            pinned = answer.pinned,
+                            archived = answer.archived,
+                            title = answer.title ?: s.title,
+                            titleSource = answer.titleSource,
+                        )
+                    }
+                }
+                currentIf(sessionId)?.let { open ->
+                    _conversation.value = open.copy(
+                        summary = open.summary.copy(
+                            pinned = answer.pinned,
+                            archived = answer.archived,
+                            title = answer.title ?: open.summary.title,
+                            titleSource = answer.titleSource,
+                        ),
+                    )
+                }
+                true
+            }
+            else -> {
+                _sessions.value = before
+                _messages.emit(
+                    UserMessage("Could not update that session: ${result.message()}", isError = true),
+                )
+                false
+            }
+        }
+    }
+
+    /**
+     * A hard delete — the transcript cannot be put back, which is why the UI asks
+     * first. `409` while a turn is running, and that is worth its own sentence.
+     */
+    suspend fun deleteSession(sessionId: String): Boolean {
+        val result = api.deleteSession(sessionId)
+        return when {
+            result is ApiResult.Ok -> {
+                _sessions.value = _sessions.value.filterNot { it.sessionId == sessionId }
+                true
+            }
+            result is ApiResult.Http && result.status == 409 -> {
+                _messages.emit(UserMessage("It is working — stop it before deleting", isError = true))
+                false
+            }
+            result is ApiResult.Http && result.status == 404 -> {
+                _sessions.value = _sessions.value.filterNot { it.sessionId == sessionId }
+                true
+            }
+            else -> {
+                _messages.emit(UserMessage("Could not delete: ${result.message()}", isError = true))
+                false
+            }
         }
     }
 
@@ -1274,17 +1498,25 @@ class BridgeRepository(
         )
     }
 
+    /**
+     * @param model `""` or null for inherit; both leave the field out.
+     * @param effort the same.
+     */
     suspend fun createSession(
         cwd: String,
         prompt: String,
         mode: String,
         test: Boolean,
+        model: String? = null,
+        effort: String? = null,
     ): Result<String> {
         val body = CreateSessionRequest(
             cwd = cwd,
             prompt = prompt,
             permissionMode = mode,
             test = test,
+            model = model?.takeIf { it.isNotBlank() },
+            effort = effort?.takeIf { it.isNotBlank() },
         )
         return when (val result = api.createSession(body)) {
             is ApiResult.Ok -> Result.success(result.value.sessionId)

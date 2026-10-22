@@ -1,5 +1,6 @@
 package com.twentygx.tgxcode.ui
 
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -7,9 +8,12 @@ import androidx.lifecycle.viewModelScope
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.Draft
 import com.twentygx.tgxcode.data.model.DraftBody
+import com.twentygx.tgxcode.data.model.FlagsRequest
+import com.twentygx.tgxcode.data.model.SessionChoices
 import com.twentygx.tgxcode.data.model.PermissionRequestBody
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.data.model.SuggestedTask
+import com.twentygx.tgxcode.data.model.UserEvent
 import com.twentygx.tgxcode.data.net.PairingInput
 import com.twentygx.tgxcode.data.repo.BridgeRepository
 import com.twentygx.tgxcode.data.repo.ConnState
@@ -87,9 +91,44 @@ class AppViewModel(
     private val _prSheet = MutableStateFlow<PrSheetState?>(null)
     val prSheet: StateFlow<PrSheetState?> = _prSheet.asStateFlow()
 
+    /**
+     * The long-press options sheet on a Sessions row, or null for closed. Held here
+     * rather than in the screen for the same reason as [prSheet]: it outlives a
+     * rotation, and the writes it starts are brokered here.
+     */
+    private val _sessionSheet = MutableStateFlow<SessionSummary?>(null)
+    val sessionSheet: StateFlow<SessionSummary?> = _sessionSheet.asStateFlow()
+
+    /** The earlier turn the next send branches from, if Edit and branch is armed. */
+    private val _branch = MutableStateFlow<BranchFrom?>(null)
+    val branch: StateFlow<BranchFrom?> = _branch.asStateFlow()
+
+    /**
+     * Bumped whenever a mode, model or effort pick changes.
+     *
+     * The picks themselves live in plain maps on the repository, which Compose cannot
+     * see — so [modeFor] and friends read this, and a pick recomposes whatever drew
+     * the label rather than waiting for the next unrelated state change to do it.
+     */
+    private val picks = mutableIntStateOf(0)
+
     private var lease: AutoCloseable? = null
 
     init {
+        // Text the bridge handed back — a failed send, or what a stop took off the
+        // queue — goes back in the box it came from, after anything already typed.
+        viewModelScope.launch {
+            repo.unsent.collect { back ->
+                if (repo.conversation.value?.sessionId != back.sessionId) return@collect
+                val returned = back.texts.joinToString("\n\n")
+                _draft.value = listOf(_draft.value.trim(), returned)
+                    .filter { it.isNotEmpty() }
+                    .joinToString("\n\n")
+                // A refused cut is refused again on retry; the way forward is an
+                // ordinary send, so the branch stands down.
+                if (back.kind == "branch-refused") _branch.value = null
+            }
+        }
         viewModelScope.launch {
             while (isActive) {
                 _now.value = System.currentTimeMillis()
@@ -180,6 +219,9 @@ class AppViewModel(
     fun open(sessionId: String) = viewModelScope.launch {
         expandedTools.clear()
         _draft.value = ""
+        // A branch was about the session it was armed on, and would be a surprise
+        // waiting on the next one opened.
+        if (_branch.value?.sessionId != sessionId) _branch.value = null
         val fresh = justCreated == sessionId
         if (fresh) justCreated = null
         repo.openSession(sessionId, awaitCreation = fresh)
@@ -195,27 +237,186 @@ class AppViewModel(
 
     fun loadAll() = viewModelScope.launch { repo.loadWholeTranscript() }
 
-    fun setMode(sessionId: String, mode: String) = repo.setPendingMode(sessionId, mode)
+    fun setMode(sessionId: String, mode: String) {
+        repo.setPendingMode(sessionId, mode)
+        picks.intValue++
+    }
 
-    fun modeFor(sessionId: String): String =
-        repo.pendingMode(sessionId)
+    fun modeFor(sessionId: String): String {
+        picks.intValue
+        return repo.pendingMode(sessionId)
             ?: repo.conversation.value?.runner?.permissionMode
             ?: repo.conversation.value?.summary?.permissionMode
             ?: "auto"
-
-    fun send(sessionId: String, mode: String) = viewModelScope.launch {
-        val text = _draft.value.trim()
-        if (text.isEmpty()) return@launch
-        _sending.value = true
-        // Cleared optimistically: the transcript is the record, and holding text in
-        // the box after it is already sent invites sending it twice.
-        _draft.value = ""
-        val restored = repo.send(sessionId, text, mode)
-        if (restored != null) _draft.value = restored
-        _sending.value = false
     }
 
-    fun stop(sessionId: String) = viewModelScope.launch { repo.stop(sessionId) }
+    fun setModel(sessionId: String, model: String) {
+        repo.setPendingModel(sessionId, model)
+        picks.intValue++
+    }
+
+    fun setEffort(sessionId: String, effort: String) {
+        repo.setPendingEffort(sessionId, effort)
+        picks.intValue++
+    }
+
+    /**
+     * The model picker's value — the desktop's `paintModel` ladder, top rung last.
+     *
+     * A change the bridge is holding ([RunnerStatus.pendingSettings]) outranks what the
+     * process runs now, because it is what the *next* turn after the background work
+     * will run, and showing the old value would invite picking the new one twice.
+     */
+    fun modelFor(sessionId: String): String {
+        picks.intValue
+        repo.pendingModel(sessionId)?.let { return it }
+        val open = repo.conversation.value?.takeIf { it.sessionId == sessionId }
+        val runner = open?.runner
+        runner?.pendingSettings?.let { return SessionChoices.knownModel(it.model) }
+        if (runner != null) return SessionChoices.knownModel(runner.model)
+        return SessionChoices.knownModel(open?.summary?.model)
+    }
+
+    /**
+     * The effort picker's value: [modelFor] less its last rung. The transcript never
+     * records effort, so with no live process and no pick this is `inherit` — which is
+     * also what a send from it then asks for, so what this shows is what runs.
+     */
+    fun effortFor(sessionId: String): String {
+        picks.intValue
+        repo.pendingEffort(sessionId)?.let { return it }
+        val runner = repo.conversation.value?.takeIf { it.sessionId == sessionId }?.runner
+        runner?.pendingSettings?.let { return SessionChoices.knownEffort(it.effort) }
+        return SessionChoices.knownEffort(runner?.effort)
+    }
+
+    /**
+     * @param onNewSession called when the send started a session of its own — Edit and
+     *   branch from the first turn, which has nothing before it to keep, so it becomes a
+     *   new session in the same folder with the edited text, as on the desktop.
+     */
+    fun send(sessionId: String, mode: String, onNewSession: (String) -> Unit = {}) =
+        viewModelScope.launch {
+            val text = _draft.value.trim()
+            if (text.isEmpty()) return@launch
+            val branch = _branch.value?.takeIf { it.sessionId == sessionId }
+            _sending.value = true
+            // Cleared optimistically: the transcript is the record, and holding text in
+            // the box after it is already sent invites sending it twice.
+            _draft.value = ""
+
+            if (branch?.first == true) {
+                val open = repo.conversation.value?.takeIf { it.sessionId == sessionId }
+                val cwd = open?.summary?.cwd
+                if (cwd == null) {
+                    _draft.value = text
+                    repo.report("That session has no folder to start in", isError = true)
+                } else {
+                    repo.createSession(
+                        cwd = cwd,
+                        prompt = text,
+                        mode = mode,
+                        test = open.summary.test,
+                        model = modelFor(sessionId),
+                        effort = effortFor(sessionId),
+                    ).onSuccess { id ->
+                        _branch.value = null
+                        justCreated = id
+                        onNewSession(id)
+                    }.onFailure { error ->
+                        _draft.value = text
+                        repo.report("Could not start it: ${error.message}", isError = true)
+                    }
+                }
+                _sending.value = false
+                return@launch
+            }
+
+            val restored = repo.send(
+                sessionId = sessionId,
+                text = text,
+                mode = mode,
+                model = modelFor(sessionId),
+                effort = effortFor(sessionId),
+                fromUuid = branch?.uuid,
+            )
+            if (restored != null) {
+                _draft.value = restored
+            } else {
+                // Sent: the copy is being made, and `session-forked` takes us there.
+                if (branch != null) _branch.value = null
+                picks.intValue++
+            }
+            _sending.value = false
+        }
+
+    /**
+     * A stalled turn gets a hard stop, as on the desktop: a process that has gone
+     * silent is the one least likely to answer an interrupt.
+     */
+    fun stop(sessionId: String) = viewModelScope.launch {
+        val stalled = repo.conversation.value
+            ?.takeIf { it.sessionId == sessionId }?.runner?.stalled == true
+        repo.stop(sessionId, hard = stalled)
+    }
+
+    // ------------------------------------------------------------ edit & branch
+
+    /** Put one of your earlier turns back in the box, to send again as the next turn. */
+    fun editAndResend(event: UserEvent) {
+        _branch.value = null
+        _draft.value = event.displayText()
+    }
+
+    /**
+     * Put one of your earlier turns back in the box, and arm the next send to go to a
+     * *copy* of this session cut back to just before it. The original is never
+     * rewritten.
+     *
+     * Where the turn sits is counted from what is loaded, so it is only claimed when
+     * the whole transcript is in hand; otherwise the banner says "an earlier turn".
+     */
+    fun editAndBranch(sessionId: String, event: UserEvent) {
+        val open = repo.conversation.value?.takeIf { it.sessionId == sessionId } ?: return
+        val turns = open.events.filterIsInstance<UserEvent>().filter { it.fromHuman }
+        val whole = (open.truncated?.dropped ?: 0) == 0
+        val index = turns.indexOfFirst { it.id == event.id }
+        val turn = if (whole && index >= 0) index + 1 else null
+        _branch.value = BranchFrom(
+            sessionId = sessionId,
+            uuid = event.id,
+            turn = turn,
+            total = if (whole) turns.size else null,
+            // `parent` is null on the first turn — and on every turn from a bridge
+            // that predates branching, so only the position can settle it then.
+            first = event.parent == null && turn == 1,
+        )
+        _draft.value = event.displayText()
+    }
+
+    fun cancelBranch() {
+        _branch.value = null
+    }
+
+    // ----------------------------------------------------------------- queue
+
+    fun dropQueued(sessionId: String, queueId: String) =
+        viewModelScope.launch { repo.dropQueued(sessionId, queueId) }
+
+    /**
+     * Move one queued message up or down a place. A `handed` message keeps its place
+     * at the front whatever is sent, so it never takes part.
+     */
+    fun moveQueued(sessionId: String, queueId: String, by: Int) = viewModelScope.launch {
+        val queue = repo.conversation.value
+            ?.takeIf { it.sessionId == sessionId }?.runner?.queue.orEmpty()
+        val ids = queue.filterNot { it.handed }.mapNotNull { it.id }.toMutableList()
+        val from = ids.indexOf(queueId)
+        val to = from + by
+        if (from < 0 || to !in ids.indices) return@launch
+        ids.add(to, ids.removeAt(from))
+        repo.reorderQueue(sessionId, ids)
+    }
 
     fun answer(sessionId: String, body: PermissionRequestBody) = viewModelScope.launch {
         _answering.value = _answering.value + body.requestId
@@ -336,6 +537,8 @@ class AppViewModel(
 
     fun setNewCwd(cwd: String) { _newSession.value = _newSession.value.copy(cwd = cwd) }
     fun setNewMode(mode: String) { _newSession.value = _newSession.value.copy(mode = mode) }
+    fun setNewModel(model: String) { _newSession.value = _newSession.value.copy(model = model) }
+    fun setNewEffort(effort: String) { _newSession.value = _newSession.value.copy(effort = effort) }
     fun setNewPrompt(text: String) { _newSession.value = _newSession.value.copy(prompt = text) }
     fun setNewTest(on: Boolean) { _newSession.value = _newSession.value.copy(test = on) }
 
@@ -347,7 +550,14 @@ class AppViewModel(
             return@launch
         }
         _newSession.value = state.copy(starting = true, error = null)
-        repo.createSession(state.cwd.orEmpty(), state.prompt.trim(), state.mode, state.test)
+        repo.createSession(
+            cwd = state.cwd.orEmpty(),
+            prompt = state.prompt.trim(),
+            mode = state.mode,
+            test = state.test,
+            model = state.model,
+            effort = state.effort,
+        )
             .onSuccess { id ->
                 _newSession.value = _newSession.value.copy(
                     starting = false,
@@ -397,6 +607,33 @@ class AppViewModel(
         } finally {
             _acting.value = _acting.value - id
         }
+    }
+
+    // ------------------------------------------------------------ session flags
+
+    fun openSessionSheet(session: SessionSummary) {
+        _sessionSheet.value = session
+    }
+
+    fun closeSessionSheet() {
+        _sessionSheet.value = null
+    }
+
+    fun setPinned(session: SessionSummary, pinned: Boolean) = viewModelScope.launch {
+        repo.setFlags(session.sessionId, FlagsRequest(pinned = pinned))
+    }
+
+    fun setArchived(session: SessionSummary, archived: Boolean) = viewModelScope.launch {
+        repo.setFlags(session.sessionId, FlagsRequest(archived = archived))
+    }
+
+    /** A blank name clears the one given here, and the transcript's title shows again. */
+    fun rename(session: SessionSummary, title: String) = viewModelScope.launch {
+        repo.setFlags(session.sessionId, FlagsRequest(title = title.trim()))
+    }
+
+    fun deleteSession(session: SessionSummary) = viewModelScope.launch {
+        if (repo.deleteSession(session.sessionId)) repo.report("Deleted “${session.displayTitle}”")
     }
 
     // ------------------------------------------------------------------- prs
@@ -456,14 +693,17 @@ class AppViewModel(
     /**
      * Load a saved draft back into the form above it.
      *
-     * `model` and `title` are deliberately not touched — this screen has no control for
-     * either, and [DraftBody] does not send them, so whatever was set at the desk
-     * survives an edit made here.
+     * `title` is deliberately not touched — this screen has no control for it, and
+     * [DraftBody] does not send one, so whatever was set at the desk survives an edit
+     * made here. A model or effort the pickers do not offer shows as `inherit`, and
+     * saving would then clear it — the same trade the desktop's selects make.
      */
     fun editDraft(draft: Draft) {
         _newSession.value = NewSessionUiState(
             cwd = draft.cwd,
             mode = draft.permissionMode,
+            model = SessionChoices.knownModel(draft.model),
+            effort = SessionChoices.knownEffort(draft.effort),
             prompt = draft.prompt,
             test = draft.test,
             editingDraftId = draft.id,
@@ -472,7 +712,7 @@ class AppViewModel(
 
     fun clearDraftEdit() {
         val state = _newSession.value
-        _newSession.value = NewSessionUiState(cwd = state.cwd, mode = state.mode)
+        _newSession.value = state.blankKeepingSetup()
     }
 
     fun saveDraft() = viewModelScope.launch {
@@ -543,7 +783,7 @@ class AppViewModel(
 
         repo.startDraft(draft.id)
             .onSuccess { id ->
-                _newSession.value = NewSessionUiState(cwd = state.cwd, mode = state.mode)
+                _newSession.value = state.blankKeepingSetup()
                 justCreated = id
                 onStarted(id)
             }
@@ -572,6 +812,9 @@ data class NewSessionUiState(
      * written with the least idea of what it will touch.
      */
     val mode: String = "plan",
+    /** `""` is `inherit`, in both. */
+    val model: String = "",
+    val effort: String = "",
     val prompt: String = "",
     val test: Boolean = false,
     val starting: Boolean = false,
@@ -595,7 +838,13 @@ data class NewSessionUiState(
         // Always sent: an absent mode does not mean "decide later", it means `auto`.
         permissionMode = mode,
         test = test,
+        model = model,
+        effort = effort,
     )
+
+    /** A fresh form that keeps where and how — the folder and the three pickers. */
+    fun blankKeepingSetup(): NewSessionUiState =
+        NewSessionUiState(cwd = cwd, mode = mode, model = model, effort = effort)
 
     /**
      * Whether starting this would run something other than what is on screen. `cwd` is
@@ -605,5 +854,31 @@ data class NewSessionUiState(
         cwd != draft.cwd ||
             prompt.trim() != draft.prompt ||
             mode != draft.permissionMode ||
+            model != SessionChoices.knownModel(draft.model) ||
+            effort != SessionChoices.knownEffort(draft.effort) ||
             test != draft.test
+}
+
+/**
+ * An armed Edit and branch.
+ *
+ * @param uuid the turn's own `user` event id — what `fromUuid` takes. Never its parent.
+ * @param turn 1-based position among your turns, when the whole transcript is loaded.
+ * @param first nothing before it to keep: the send becomes a new session instead.
+ */
+data class BranchFrom(
+    val sessionId: String,
+    val uuid: String,
+    val turn: Int? = null,
+    val total: Int? = null,
+    val first: Boolean = false,
+) {
+    val banner: String
+        get() = when {
+            first -> "Branching from the first turn — this starts a new session in the same folder."
+            turn == null || total == null ->
+                "Branching from an earlier turn — the copy will not include it or anything after it."
+            turn == total -> "Branching from turn $turn of $total — the copy will not include turn $turn."
+            else -> "Branching from turn $turn of $total — the copy will not include turns $turn–$total."
+        }
 }

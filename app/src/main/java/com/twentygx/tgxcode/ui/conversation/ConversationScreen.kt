@@ -76,6 +76,10 @@ fun ConversationScreen(
     /** Absent only in a preview; a real conversation always has one. */
     suggestionActions: TaskActions? = null,
     acting: Set<String> = emptySet(),
+    controls: ComposerControls = ComposerControls(),
+    userActions: UserTurnActions? = null,
+    onDropQueued: (String) -> Unit = {},
+    onMoveQueued: (String, Int) -> Unit = { _, _ -> },
 ) {
     if (conversation == null) {
         // A just-created session is not readable until Claude Code has written its
@@ -94,6 +98,7 @@ fun ConversationScreen(
     }
 
     val listState = rememberLazyListState()
+    var queueOpen by rememberSaveable(conversation.sessionId) { mutableStateOf(false) }
 
     /**
      * LazyColumn row space, named once.
@@ -277,6 +282,7 @@ fun ConversationScreen(
                             actions = it,
                         )
                     },
+                    userActions = userActions,
                 )
             }
         }
@@ -300,6 +306,16 @@ fun ConversationScreen(
             onSend = onSend,
             onStop = onStop,
             modifier = Modifier.imePadding().navigationBarsPadding(),
+            controls = controls.copy(onOpenQueue = { queueOpen = true }),
+        )
+    }
+
+    if (queueOpen) {
+        QueueSheet(
+            queue = conversation.runner?.queue.orEmpty(),
+            onDrop = onDropQueued,
+            onMove = onMoveQueued,
+            onDismiss = { queueOpen = false },
         )
     }
 }

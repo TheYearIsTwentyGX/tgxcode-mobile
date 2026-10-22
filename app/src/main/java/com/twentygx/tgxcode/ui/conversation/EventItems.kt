@@ -58,6 +58,17 @@ data class SuggestionSlot(
     val actions: TaskActions,
 )
 
+/**
+ * Doing one of your own earlier turns over, from its long-press menu.
+ *
+ * **Edit and resend** puts the text back to send as the next turn; nothing is undone.
+ * **Edit and branch** sends the edit to a *copy* cut back to just before that turn.
+ */
+data class UserTurnActions(
+    val onEditResend: (UserEvent) -> Unit,
+    val onEditBranch: (UserEvent) -> Unit,
+)
+
 /** Dispatch. An unknown kind renders nothing, matching mobile.js. */
 @Composable
 fun EventItem(
@@ -66,6 +77,7 @@ fun EventItem(
     onToggleTool: (String) -> Unit,
     modifier: Modifier = Modifier,
     suggestions: SuggestionSlot? = null,
+    userActions: UserTurnActions? = null,
 ) {
     val padded = modifier
         .fillMaxWidth()
@@ -73,7 +85,7 @@ fun EventItem(
         .padding(bottom = 14.dp)
 
     when (event) {
-        is UserEvent -> UserBubble(event, padded)
+        is UserEvent -> UserBubble(event, padded, userActions)
         is AssistantEvent -> {
             val text = event.text.orEmpty()
             MessageActions(
@@ -122,15 +134,30 @@ fun EventItem(
  * sender. Text is pre-wrapped; images are counted, never shown.
  */
 @Composable
-private fun UserBubble(event: UserEvent, modifier: Modifier = Modifier) {
+private fun UserBubble(
+    event: UserEvent,
+    modifier: Modifier = Modifier,
+    actions: UserTurnActions? = null,
+) {
     // An origin that is not `human` means an agent sent this, which the prefix says
     // — otherwise the transcript reads as if the user typed it.
     val text = event.displayText()
+    // Only your own turns can be done over: a peer's message or an agent's prompt is
+    // not a turn `fromUuid` will cut at, and resending it would put words in your mouth.
+    val extra = if (actions != null && event.fromHuman) {
+        listOf(
+            MessageAction("Edit and resend") { actions.onEditResend(event) },
+            MessageAction("Edit and branch") { actions.onEditBranch(event) },
+        )
+    } else {
+        emptyList()
+    }
 
     Row(modifier, horizontalArrangement = Arrangement_End) {
         MessageActions(
             markdown = text,
             modifier = Modifier.padding(start = 28.dp),
+            extra = extra,
             selectable = { Text(text, style = MaterialTheme.typography.bodyMedium) },
         ) {
             Column(

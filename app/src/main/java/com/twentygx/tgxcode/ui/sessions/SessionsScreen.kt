@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -72,13 +73,19 @@ fun SessionsScreen(
      * the wording for a grey glyph, so the rows need it too.
      */
     prs: PrsPayload?,
-    onPrs: (SessionSummary) -> Unit,
+    /** The row's long press: pin, archive, rename, delete, and its pull requests. */
+    onOptions: (SessionSummary) -> Unit,
+    showArchived: Boolean = false,
+    onShowArchivedChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val needle = filter.trim().lowercase()
     val searching = needle.isNotEmpty()
+    val archivedCount = sessions.count { it.archived }
     val visible = sessions.asSequence()
-        .filterNot { it.archived }
+        // Archived *instead of* the rest, not as well: the chip is a way to find one
+        // you put away, and burying it under every live session defeats that.
+        .filter { it.archived == showArchived }
         .filter { session ->
             !searching || listOfNotNull(
                 session.title,
@@ -86,6 +93,9 @@ fun SessionsScreen(
                 session.worktree?.name,
             ).any { it.lowercase().contains(needle) }
         }
+        // Pinned first, as on the rail; otherwise the bridge's order, untouched —
+        // `sortedByDescending` is stable.
+        .sortedByDescending { it.pinned }
         .toList()
 
     val needsCount = board?.sessions.orEmpty().size
@@ -107,10 +117,22 @@ fun SessionsScreen(
             textStyle = MaterialTheme.typography.bodyMedium,
         )
 
+        // Only once there is something archived to show — a chip that can only ever
+        // produce an empty list is a control with no purpose.
+        if (archivedCount > 0 || showArchived) {
+            FilterChip(
+                selected = showArchived,
+                onClick = { onShowArchivedChanged(!showArchived) },
+                label = { Text("Archived · $archivedCount") },
+                modifier = Modifier.padding(horizontal = Metrics.ScreenPadding),
+            )
+        }
+
         if (bare) {
             EmptyState(
                 headline = when {
                     searching -> "Nothing matches"
+                    showArchived -> "Nothing archived"
                     board == null -> "Waiting for the bridge…"
                     else -> "No sessions yet"
                 },
@@ -136,13 +158,13 @@ fun SessionsScreen(
                 // moves, and everything inserted after it stays on screen.
                 item(key = "list-anchor") { Spacer(Modifier.height(0.dp)) }
 
-                if (!searching) {
+                if (!searching && !showArchived) {
                     needsSection(board, answering, onOpen, onAnswer)
                 }
 
                 // The heading earns its place only when there is something above it to
                 // be distinguished from.
-                if (!searching && needsCount > 0) {
+                if (!searching && !showArchived && needsCount > 0) {
                     item(key = "sessions-header") {
                         SectionHeader("All sessions", trailing = "${visible.size}")
                     }
@@ -156,11 +178,7 @@ fun SessionsScreen(
                         badge = badge,
                         ghError = prs?.gh?.error,
                         onClick = { onOpen(session.sessionId) },
-                        // Null rather than an empty lambda. A no-op would still
-                        // swallow the press *and* still advertise an `OnLongClick`
-                        // action, so a screen-reader user would be offered one that
-                        // does nothing.
-                        onLongClick = if (badge == null) null else ({ onPrs(session) }),
+                        onLongClick = { onOptions(session) },
                     )
                     HorizontalDivider(color = tgx.outlineSoft, thickness = 1.dp)
                 }
@@ -172,7 +190,6 @@ fun SessionsScreen(
 /**
  * @param badge null for a session that raised no pull requests, which draws nothing.
  *   Not the same as one whose PRs nobody has resolved yet — that is a grey glyph.
- * @param onLongClick null when there is nothing to show. See the call site.
  */
 @Composable
 private fun SessionRow(
@@ -181,10 +198,11 @@ private fun SessionRow(
     badge: PrBadge?,
     ghError: String?,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)?,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val meta = listOfNotNull(
+        "pinned".takeIf { session.pinned },
         session.place?.takeIf { it.isNotBlank() },
         ago(session.lastTs).takeIf { it.isNotBlank() },
         "${session.userMessages} turn${if (session.userMessages == 1) "" else "s"}",
@@ -202,18 +220,16 @@ private fun SessionRow(
             // pointer sequence, so the following up never reaches `onClick`.
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = onLongClick?.let {
-                    {
-                        // Done explicitly because whether Foundation does it for us has
-                        // changed across versions. If the phone buzzes twice, drop this
-                        // rather than keeping both.
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        it()
-                    }
+                onLongClick = {
+                    // Done explicitly because whether Foundation does it for us has
+                    // changed across versions. If the phone buzzes twice, drop this
+                    // rather than keeping both.
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
                 },
                 // What TalkBack reads out for the custom action. Without it the gesture
                 // is invisible to a screen reader and the sheet is unreachable.
-                onLongClickLabel = "Pull requests",
+                onLongClickLabel = "Session options",
             )
             .padding(horizontal = Metrics.ScreenPadding, vertical = 10.dp),
     ) {

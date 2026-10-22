@@ -87,6 +87,8 @@ data class CreateSessionRequest(
     val cwd: String,
     val prompt: String,
     val model: String? = null,
+    /** Absent is `inherit` — no `--effort` flag. */
+    val effort: String? = null,
     val permissionMode: String? = null,
     /** Keeps it out of the everyday window. Use it for anything exploratory. */
     val test: Boolean = false,
@@ -117,8 +119,64 @@ data class CreateSessionResponse(
 data class SendRequest(
     val text: String,
     val permissionMode: String,
+    /** Absent and null both mean "as you were" — there is no asking a live process to inherit. */
     val model: String? = null,
+    /**
+     * **The one field where absent and null differ**, so it is a string that is always
+     * sent: a level, or `""` for `inherit`, which the bridge reads as null and honours
+     * by replacing a process that has a level. Leaving it out would keep whatever the
+     * live process has, which is what a client *without* a selector should do — and
+     * this one has a selector.
+     */
+    val effort: String? = null,
     val fork: Boolean? = null,
+    /**
+     * Edit and branch: the `id` of one of your own `user` events — the turn itself,
+     * never its parent. Only accepted with [fork]; the copy keeps everything before
+     * that turn and [text] takes its place.
+     */
+    val fromUuid: String? = null,
+)
+
+/** `hard` is SIGTERM then SIGKILL — what a stalled turn gets, since it is the least likely to answer an interrupt. */
+@Serializable
+data class StopRequest(val hard: Boolean? = null)
+
+/**
+ * `POST /api/sessions/:id/flags`. Every field optional; only what is sent changes.
+ * [title] `""` clears a name given here, and the session shows its transcript's
+ * title again.
+ */
+@Serializable
+data class FlagsRequest(
+    val pinned: Boolean? = null,
+    val archived: Boolean? = null,
+    val title: String? = null,
+)
+
+/** [title] is the name the session now *shows*, not the flag — after a clear it is the transcript's again. */
+@Serializable
+data class FlagsResponse(
+    val ok: Boolean = false,
+    val sessionId: String? = null,
+    val pinned: Boolean = false,
+    val archived: Boolean = false,
+    val test: Boolean = false,
+    val title: String? = null,
+    val titleSource: String? = null,
+)
+
+@Serializable
+data class QueueReorderRequest(val ids: List<String>)
+
+/**
+ * What every queue write answers. Dropping one is `{ok, removed, status}`; the status
+ * is the whole runner, and the queue chips redraw from it.
+ */
+@Serializable
+data class QueueWriteResponse(
+    val ok: Boolean = false,
+    val status: RunnerStatus? = null,
 )
 
 /**

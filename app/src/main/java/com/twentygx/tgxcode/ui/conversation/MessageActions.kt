@@ -62,11 +62,14 @@ import kotlinx.coroutines.launch
  *   is nothing to copy and the row has no menu, matching the desktop's `copyButton`.
  * @param selectable what the Select text sheet shows. For a user turn this is the text
  *   alone, without the bubble around it.
+ * @param extra items after the two above — Edit and resend, Edit and branch on a turn
+ *   of your own.
  */
 @Composable
 fun MessageActions(
     markdown: String,
     modifier: Modifier = Modifier,
+    extra: List<MessageAction> = emptyList(),
     selectable: @Composable () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -112,6 +115,12 @@ fun MessageActions(
                     text = { Text("Select text") },
                     onClick = { menuAt = null; selecting = true },
                 )
+                extra.forEach { action ->
+                    DropdownMenuItem(
+                        text = { Text(action.label) },
+                        onClick = { menuAt = null; action.onClick() },
+                    )
+                }
             }
         }
     }
@@ -119,6 +128,9 @@ fun MessageActions(
     if (askFormat) CopyFormatDialog(markdown, onDone = { askFormat = false })
     if (selecting) SelectTextSheet(onDismiss = { selecting = false }, content = selectable)
 }
+
+/** One more line in a message's long-press menu. */
+data class MessageAction(val label: String, val onClick: () -> Unit)
 
 /**
  * With formatting: the markdown exactly as it was written, for anywhere that renders

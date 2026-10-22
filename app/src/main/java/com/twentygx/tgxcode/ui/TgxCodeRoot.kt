@@ -54,10 +54,14 @@ import com.twentygx.tgxcode.data.repo.NavCommand
 import com.twentygx.tgxcode.ui.common.ConnectionDot
 import com.twentygx.tgxcode.ui.common.DegradedBanner
 import com.twentygx.tgxcode.ui.common.RemoteBanner
+import com.twentygx.tgxcode.ui.conversation.ComposerControls
 import com.twentygx.tgxcode.ui.conversation.ConversationScreen
+import com.twentygx.tgxcode.ui.conversation.UserTurnActions
 import com.twentygx.tgxcode.ui.newsession.NewSessionScreen
 import com.twentygx.tgxcode.ui.newsession.recentDirs
 import com.twentygx.tgxcode.ui.sessions.PrSheet
+import com.twentygx.tgxcode.ui.sessions.SessionActionsSheet
+import com.twentygx.tgxcode.ui.sessions.SessionSheetActions
 import com.twentygx.tgxcode.ui.sessions.SessionsScreen
 import com.twentygx.tgxcode.ui.tasks.TaskActions
 import com.twentygx.tgxcode.ui.tasks.TasksScreen
@@ -106,8 +110,11 @@ fun TgxCodeRoot(
     val acting by vm.acting.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val opening by vm.repo.opening.collectAsStateWithLifecycle()
+    val sessionSheet by vm.sessionSheet.collectAsStateWithLifecycle()
+    val branch by vm.branch.collectAsStateWithLifecycle()
 
     var filter by rememberSaveable { mutableStateOf("") }
+    var showArchived by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         vm.repo.messages.collect { message ->
@@ -319,7 +326,9 @@ fun TgxCodeRoot(
                             onOpen = { nav.navigate(Conversation(it)) },
                             onAnswer = { ask, decision -> vm.answerFromBoard(ask, decision) },
                             prs = prs,
-                            onPrs = vm::openPrSheet,
+                            onOptions = vm::openSessionSheet,
+                            showArchived = showArchived,
+                            onShowArchivedChanged = { showArchived = it },
                         )
                     }
                 }
@@ -349,6 +358,10 @@ fun TgxCodeRoot(
                         mode = newSession.mode,
                         modes = health?.offeredModes().orEmpty(),
                         onModeChanged = vm::setNewMode,
+                        model = newSession.model,
+                        onModelChanged = vm::setNewModel,
+                        effort = newSession.effort,
+                        onEffortChanged = vm::setNewEffort,
                         prompt = newSession.prompt,
                         onPromptChanged = vm::setNewPrompt,
                         test = newSession.test,
@@ -372,6 +385,7 @@ fun TgxCodeRoot(
                     val route = backStackEntry.toRoute<Conversation>()
                     LaunchedEffect(route.sessionId) { vm.open(route.sessionId) }
                     val mode = vm.modeFor(route.sessionId)
+                    val sessionId = route.sessionId
                     ConversationScreen(
                         conversation = conversation?.takeIf { it.sessionId == route.sessionId },
                         expandedTools = vm.expandedTools,
@@ -384,7 +398,13 @@ fun TgxCodeRoot(
                         sending = sending,
                         answering = answering.isNotEmpty(),
                         nowMillis = now,
-                        onSend = { vm.send(route.sessionId, mode) },
+                        onSend = {
+                            vm.send(sessionId, mode) { id ->
+                                nav.navigate(Conversation(id)) {
+                                    popUpTo(Conversation(sessionId)) { inclusive = true }
+                                }
+                            }
+                        },
                         onStop = { vm.stop(route.sessionId) },
                         onAnswer = { body -> vm.answer(route.sessionId, body) },
                         onLoadAll = vm::loadAll,
@@ -392,6 +412,22 @@ fun TgxCodeRoot(
                         starting = opening == route.sessionId,
                         suggestionActions = taskActions,
                         acting = acting,
+                        controls = ComposerControls(
+                            model = vm.modelFor(sessionId),
+                            onModelChanged = { vm.setModel(sessionId, it) },
+                            effort = vm.effortFor(sessionId),
+                            onEffortChanged = { vm.setEffort(sessionId, it) },
+                            branchBanner = branch?.takeIf { it.sessionId == sessionId }?.banner,
+                            onCancelBranch = vm::cancelBranch,
+                        ),
+                        userActions = remember(sessionId) {
+                            UserTurnActions(
+                                onEditResend = vm::editAndResend,
+                                onEditBranch = { vm.editAndBranch(sessionId, it) },
+                            )
+                        },
+                        onDropQueued = { vm.dropQueued(sessionId, it) },
+                        onMoveQueued = { id, by -> vm.moveQueued(sessionId, id, by) },
                     )
                 }
                 composable<Settings> {
@@ -415,6 +451,22 @@ fun TgxCodeRoot(
     // it is its own window, so nothing in the layout above clips it.
     prSheet?.let { sheet ->
         PrSheet(state = sheet, onDismiss = vm::closePrSheet, onOpenUrl = openUrl)
+    }
+
+    sessionSheet?.let { session ->
+        SessionActionsSheet(
+            session = session,
+            actions = remember {
+                SessionSheetActions(
+                    onPin = vm::setPinned,
+                    onArchive = vm::setArchived,
+                    onRename = vm::rename,
+                    onDelete = vm::deleteSession,
+                    onPrs = vm::openPrSheet,
+                )
+            },
+            onDismiss = vm::closeSessionSheet,
+        )
     }
 }
 
