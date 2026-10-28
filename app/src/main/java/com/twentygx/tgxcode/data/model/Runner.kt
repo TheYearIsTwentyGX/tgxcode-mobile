@@ -62,6 +62,11 @@ data class RunnerStatus(
     val queued: Int = 0,
     val queue: List<QueuedMessage> = emptyList(),
     val pendingPermission: Ask? = null,
+    /**
+     * A `sudo -A` waiting on a password. Separate from [pendingPermission], and both can
+     * be set at once. Every status carries it, so its absence takes the card down.
+     */
+    val sudoAsk: SudoAsk? = null,
     val canPrompt: Boolean = true,
     val busySince: Long? = null,
     /**

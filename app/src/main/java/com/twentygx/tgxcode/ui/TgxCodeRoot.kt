@@ -49,6 +49,8 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.twentygx.tgxcode.data.model.sudoCardMode
+import com.twentygx.tgxcode.ui.conversation.SudoActions
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -153,6 +155,8 @@ fun TgxCodeRoot(
     val sending by vm.sending.collectAsStateWithLifecycle()
     val staged by vm.staged.collectAsStateWithLifecycle()
     val answering by vm.answering.collectAsStateWithLifecycle()
+    val sudoAnswering by vm.sudoAnswering.collectAsStateWithLifecycle()
+    val sudoAllowRemote by vm.status.sudoAllowRemote.collectAsStateWithLifecycle()
     val settingsUi by vm.settingsUi.collectAsStateWithLifecycle()
     val newSession by vm.newSession.collectAsStateWithLifecycle()
     val tasks by vm.repo.tasks.collectAsStateWithLifecycle()
@@ -192,6 +196,17 @@ fun TgxCodeRoot(
 
     var filter by rememberSaveable { mutableStateOf("") }
     var showArchived by rememberSaveable { mutableStateOf(false) }
+
+    // Approve or read-only by `sudo.allowRemote` and whether the bridge sees us as
+    // remote; the same object for every surface that draws a sudo card.
+    val sudoActions = remember(sudoAnswering, sudoAllowRemote, health?.remote) {
+        SudoActions(
+            mode = { ask -> sudoCardMode(ask, health?.remote, sudoAllowRemote) },
+            answering = sudoAnswering,
+            onApprove = vm::answerSudo,
+            onDeny = vm::denySudo,
+        )
+    }
 
     LaunchedEffect(Unit) {
         vm.repo.messages.collect { message ->
@@ -498,6 +513,7 @@ fun TgxCodeRoot(
                                 onFilterChanged = { filter = it },
                                 onOpen = { nav.navigate(Conversation(it)) },
                                 onAnswer = { ask, decision -> vm.answerFromBoard(ask, decision) },
+                                sudo = sudoActions,
                                 prs = prs,
                                 onOptions = vm::openSessionSheet,
                                 showArchived = showArchived,
@@ -661,6 +677,7 @@ fun TgxCodeRoot(
                                 },
                                 onStop = { vm.stop(route.sessionId) },
                                 onAnswer = { body -> vm.answer(route.sessionId, body) },
+                                sudo = sudoActions,
                                 onLoadAll = vm::loadAll,
                                 onOpenUrl = openUrl,
                                 starting = opening == route.sessionId,

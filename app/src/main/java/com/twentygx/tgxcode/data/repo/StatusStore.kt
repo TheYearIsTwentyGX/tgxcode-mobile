@@ -5,6 +5,7 @@ import com.twentygx.tgxcode.core.getOrNull
 import com.twentygx.tgxcode.core.message
 import com.twentygx.tgxcode.data.model.MarkReadRequest
 import com.twentygx.tgxcode.data.model.NotificationRow
+import com.twentygx.tgxcode.data.model.Prefs
 import com.twentygx.tgxcode.data.model.Quota
 import com.twentygx.tgxcode.data.model.ReadMarks
 import com.twentygx.tgxcode.data.model.StreamEvent
@@ -49,6 +50,13 @@ class StatusStore(
     private val _projectColors = MutableStateFlow<Map<String, String>>(emptyMap())
     val projectColors: StateFlow<Map<String, String>> = _projectColors.asStateFlow()
 
+    /**
+     * `sudo.allowRemote` — whether this phone may send a sudo password. Null until prefs
+     * are read, when the ask's own `remoteAnswer` decides. Pushed on every change.
+     */
+    private val _sudoAllowRemote = MutableStateFlow<Boolean?>(null)
+    val sudoAllowRemote: StateFlow<Boolean?> = _sudoAllowRemote.asStateFlow()
+
     private val _refreshingQuota = MutableStateFlow(false)
     val refreshingQuota: StateFlow<Boolean> = _refreshingQuota.asStateFlow()
 
@@ -67,7 +75,12 @@ class StatusStore(
     private suspend fun loadAll() {
         loadQuota()
         loadInbox()
-        api.prefs().getOrNull()?.let { _projectColors.value = it.projects?.colors.orEmpty() }
+        api.prefs().getOrNull()?.let(::applyPrefs)
+    }
+
+    private fun applyPrefs(prefs: Prefs) {
+        _projectColors.value = prefs.projects?.colors.orEmpty()
+        prefs.sudo?.let { _sudoAllowRemote.value = it.allowRemote }
     }
 
     suspend fun loadQuota() {
@@ -84,7 +97,7 @@ class StatusStore(
         when (event) {
             is StreamEvent.QuotaChanged -> _quota.value = event.quota
 
-            is StreamEvent.PrefsChanged -> _projectColors.value = event.prefs.projects?.colors.orEmpty()
+            is StreamEvent.PrefsChanged -> applyPrefs(event.prefs)
 
             // The default scope is the loud rows, so a quiet one filed now would not be
             // in a page fetched now either — keep the inbox to the same rule.

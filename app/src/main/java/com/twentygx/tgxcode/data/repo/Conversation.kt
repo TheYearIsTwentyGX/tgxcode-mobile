@@ -5,6 +5,7 @@ import com.twentygx.tgxcode.data.model.GhReach
 import com.twentygx.tgxcode.data.model.PrDetail
 import com.twentygx.tgxcode.data.model.RunnerStatus
 import com.twentygx.tgxcode.data.model.SessionSummary
+import com.twentygx.tgxcode.data.model.SudoAsk
 import com.twentygx.tgxcode.data.model.SuggestionDecision
 import com.twentygx.tgxcode.data.model.TaskList
 import com.twentygx.tgxcode.data.model.ToolEvent
@@ -31,6 +32,14 @@ data class Conversation(
     val runner: RunnerStatus? = null,
     val ask: Ask? = null,
     val lastOutcome: String? = null,
+    /**
+     * A `sudo -A` waiting on a password, beside [ask] rather than in it: it is answered
+     * to `/api/sudo`, and both can be up at once. Follows `runner.sudoAsk`, so a status
+     * that no longer carries it takes the card down.
+     */
+    val sudoAsk: SudoAsk? = null,
+    /** How the last sudo ask ended, for the line left where its card was. */
+    val sudoOutcome: String? = null,
     val loading: Boolean = false,
     /**
      * What was already decided about each `suggestion` event here, keyed by its id.
@@ -206,4 +215,18 @@ fun Conversation.prependEvents(incoming: List<TranscriptEvent>, from: Long): Con
         windowStart = minOf(windowStart, from),
         orphanResults = if (from > 0) orphans else emptyMap(),
     )
+}
+
+/**
+ * [Conversation.sudoAsk] from a whole runner status, which always carries `sudoAsk`.
+ * Gone from the status is gone: answered, denied, or sudo gave up — the card comes down
+ * whether or not `sudo-resolved` made it here.
+ */
+fun Conversation.withSudoFrom(status: RunnerStatus?): Conversation {
+    val next = status?.sudoAsk?.copy(sessionId = sessionId)
+    return when {
+        next?.id == sudoAsk?.id && next?.attempt == sudoAsk?.attempt -> this
+        next == null -> copy(sudoAsk = null, sudoOutcome = sudoOutcome ?: sudoAsk?.let { "sudo — Answered." })
+        else -> copy(sudoAsk = next, sudoOutcome = null)
+    }
 }

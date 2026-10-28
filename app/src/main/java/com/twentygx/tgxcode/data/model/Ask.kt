@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-enum class AskKind { Tool, Plan, Question, Unknown }
+enum class AskKind { Tool, Plan, Question, Sudo, Unknown }
 
 /**
  * Something a session is blocked on.
@@ -42,12 +42,18 @@ data class Ask(
     val agentId: String? = null,
     /** Epoch millis, unlike event timestamps. */
     val askedAt: Long? = null,
+    /**
+     * The whole ask again, typed, when this is a board card's sudo ask — see
+     * [BoardAskSerializer]. Answered to `/api/sudo`, never to `/permission`.
+     */
+    val sudo: SudoAsk? = null,
 ) {
     val askKind: AskKind
         get() = when (kind) {
             "tool" -> AskKind.Tool
             "plan" -> AskKind.Plan
             "question" -> AskKind.Question
+            "sudo" -> AskKind.Sudo
             else -> AskKind.Unknown
         }
 

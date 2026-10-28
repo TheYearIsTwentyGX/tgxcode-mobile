@@ -30,6 +30,8 @@ import com.twentygx.tgxcode.data.model.restartOutcomeOf
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.data.model.StreamEvent
 import com.twentygx.tgxcode.data.model.SubscribeRequest
+import com.twentygx.tgxcode.data.model.SudoAsk
+import com.twentygx.tgxcode.data.model.SudoOutcome
 import com.twentygx.tgxcode.data.model.SuggestedTask
 import com.twentygx.tgxcode.data.model.SuggestionActRequest
 import com.twentygx.tgxcode.data.model.TaskStatus
@@ -51,6 +53,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonObject
 import java.time.Instant
 
 /**
@@ -763,7 +766,7 @@ class BridgeRepository(
             ask != null && ask.requestId != showing -> open.copy(runner = runner, ask = ask, lastOutcome = null)
             ask == null && showing != null -> open.copy(runner = runner, ask = null, lastOutcome = "answered")
             else -> open.copy(runner = runner)
-        }
+        }.let { if (runner != null) it.withSudoFrom(runner) else it }
 
         if (ask != null && ask.requestId != showing) {
             _askEvents.emit(StreamEvent.PermissionRequested(ask))
@@ -772,6 +775,17 @@ class BridgeRepository(
             // event we are not receiving — so it says the neutral thing rather than
             // inventing one.
             _askEvents.emit(StreamEvent.PermissionResolved(sessionId, showing, null))
+        }
+
+        // The same two edges for a sudo ask, which the stream would have announced.
+        if (runner != null) {
+            val sudo = runner.sudoAsk?.copy(sessionId = sessionId)
+            val sudoShowing = open.sudoAsk?.id
+            if (sudo != null && sudo.id != sudoShowing) {
+                _askEvents.emit(StreamEvent.SudoAsked(sudo))
+            } else if (sudo == null && sudoShowing != null) {
+                _askEvents.emit(StreamEvent.SudoResolved(sudoShowing, sudoShowing, sessionId, null))
+            }
         }
     }
 
@@ -824,7 +838,33 @@ class BridgeRepository(
                         // path that catches one raised before we attached.
                         ask = open.ask ?: event.status.pendingPermission
                             ?.copy(sessionId = id),
-                    )
+                    ).withSudoFrom(event.status)
+                }
+            }
+
+            // Announced for the notification layer whichever session it is in; drawn
+            // only in the open one. Never carries a password — no event does.
+            is StreamEvent.SudoAsked -> {
+                val id = event.ask.sessionId ?: return
+                _askEvents.emit(event)
+                currentIf(id)?.let { open ->
+                    _conversation.value = open.copy(sudoAsk = event.ask, sudoOutcome = null)
+                }
+            }
+
+            is StreamEvent.SudoResolved -> {
+                _askEvents.emit(event)
+                val id = event.sessionId ?: return
+                currentIf(id)?.let { open ->
+                    // By id, for the reason permission-resolved compares requestId: a
+                    // wrong password's retry is a new ask, and must not be wiped by the
+                    // old one's resolution arriving late.
+                    if (open.sudoAsk?.id == event.id) {
+                        _conversation.value = open.copy(
+                            sudoAsk = null,
+                            sudoOutcome = SudoOutcome.word(event.outcome, event.reason),
+                        )
+                    }
                 }
             }
 
@@ -1384,6 +1424,8 @@ class BridgeRepository(
                             // stamp one in — without it every answer would POST to a
                             // null session.
                             ask = detail.runner?.pendingPermission?.copy(sessionId = sessionId),
+                            // And the sudo that predates it, likewise unstamped.
+                            sudoAsk = detail.runner?.sudoAsk?.copy(sessionId = sessionId),
                             suggestions = detail.suggestions,
                         ).applyEvents(detail.events, detail.offset)
                         subscribe()
@@ -1478,6 +1520,7 @@ class BridgeRepository(
                     offset = result.value.offset,
                     runner = result.value.runner ?: open.runner,
                     ask = open.ask,
+                    sudoAsk = open.sudoAsk,
                     suggestions = result.value.suggestions,
                     // Carried forward for the same reason `runner` is: this rebuilds
                     // the conversation from scratch, and `/api/sessions/:id` knows
@@ -1776,6 +1819,38 @@ class BridgeRepository(
                 )
                 false
             }
+        }
+    }
+
+    /**
+     * Send the password for a sudo ask. The caller has already cleared its field; this
+     * holds the string only for the length of the request.
+     *
+     * @return true when the card should stay down (sent, or answered elsewhere).
+     */
+    suspend fun answerSudo(ask: SudoAsk, password: String): Boolean =
+        settleSudo(api.answerSudo(ask.id, password), "Could not send the password")
+
+    /** Deny a sudo ask. Open to a remote caller whatever `allowRemote` says. */
+    suspend fun denySudo(ask: SudoAsk): Boolean =
+        settleSudo(api.denySudo(ask.id), "Could not deny it")
+
+    private suspend fun settleSudo(result: ApiResult<JsonObject>, failure: String): Boolean = when {
+        result is ApiResult.Ok -> true
+        result is ApiResult.Http && result.status == 409 -> {
+            _messages.emit(UserMessage("Already answered somewhere else"))
+            true
+        }
+        // `403 {remote: true}`: the switch was turned off after the card was drawn.
+        result is ApiResult.Http && result.status == 403 -> {
+            _messages.emit(
+                UserMessage("Approve at the desktop — answering sudo from a phone is off", isError = true),
+            )
+            false
+        }
+        else -> {
+            _messages.emit(UserMessage("$failure: ${result.message()}", isError = true))
+            false
         }
     }
 

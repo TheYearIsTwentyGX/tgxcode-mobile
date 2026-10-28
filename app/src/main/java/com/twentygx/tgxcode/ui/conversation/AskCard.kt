@@ -99,6 +99,26 @@ fun AskSlot(
     }
 }
 
+/** Where a sudo card was: how it ended. */
+@Composable
+fun SudoOutcomeLine(text: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .background(tgx.s2, RoundedCornerShape(Radius.Md))
+            .padding(12.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = tgx.textMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
 @Composable
 private fun AskCard(
     ask: Ask,

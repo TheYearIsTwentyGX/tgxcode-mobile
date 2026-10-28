@@ -97,6 +97,8 @@ fun ConversationScreen(
     onAnchorTaken: () -> Unit = {},
     /** A passing line for the snackbar — a jump that has nowhere to land. */
     onNotice: (String) -> Unit = {},
+    /** Answers a sudo ask; absent only in a preview. */
+    sudo: SudoActions? = null,
 ) {
     if (conversation == null) {
         // A just-created session is not readable until Claude Code has written its
@@ -366,6 +368,14 @@ fun ConversationScreen(
                     onOpenAgent = onOpenAgent,
                 )
             }
+        }
+
+        // Its own slot above the permission one: both can be up at once.
+        val sudoAsk = conversation.sudoAsk
+        if (sudoAsk != null && sudo != null) {
+            SudoCard(sudoAsk, sudo, Modifier.padding(10.dp), nowMillis = nowMillis)
+        } else if (conversation.ask == null) {
+            conversation.sudoOutcome?.let { SudoOutcomeLine(it) }
         }
 
         AskSlot(

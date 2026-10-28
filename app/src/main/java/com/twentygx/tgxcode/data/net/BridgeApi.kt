@@ -69,6 +69,7 @@ import com.twentygx.tgxcode.data.model.StopResponse
 import com.twentygx.tgxcode.data.model.SubscribeRequest
 import com.twentygx.tgxcode.data.model.SuggestionActRequest
 import com.twentygx.tgxcode.data.model.SuggestionsResponse
+import com.twentygx.tgxcode.data.model.SudoAnswerBody
 import com.twentygx.tgxcode.data.model.TaskStatus
 import com.twentygx.tgxcode.data.model.UploadedAttachment
 import com.twentygx.tgxcode.data.install.PhoneInstallRules
@@ -480,6 +481,24 @@ class BridgeApi(
         client: OkHttpClient = clients.api,
     ): ApiResult<JsonObject> =
         post("api/sessions/${sessionId.encoded()}/permission", body, serializer(), client)
+
+    /**
+     * Hand the password to the sudo waiting on ask [id] — `POST /api/sudo/:id/answer`.
+     *
+     * Through the same [post] and [executeWith] as every other route, which log the
+     * method, the path and the status and never a body, so the password reaches the
+     * socket and nothing else. `SudoLoggingTest` holds that.
+     *
+     * `403 {remote: true}` while `sudo.allowRemote` is off; `409` when it was already
+     * answered or has gone. A `200` means handed to sudo, not correct: a wrong password
+     * comes back as a fresh ask with `attempt` + 1.
+     */
+    suspend fun answerSudo(id: String, password: String): ApiResult<JsonObject> =
+        post("api/sudo/${id.encoded()}/answer", SudoAnswerBody(password), serializer())
+
+    /** Refuse it. Open to a remote caller whatever `allowRemote` says: refusing grants nothing. */
+    suspend fun denySudo(id: String): ApiResult<JsonObject> =
+        post("api/sudo/${id.encoded()}/deny", JsonObject(emptyMap()), serializer())
 
     /**
      * Start, dismiss, or undo a decision about one suggested follow-up.
