@@ -15,6 +15,7 @@ import com.twentygx.tgxcode.data.attach.canSendWith
 import com.twentygx.tgxcode.data.attach.readyRefs
 import com.twentygx.tgxcode.data.attach.tooBig
 import com.twentygx.tgxcode.data.model.Ask
+import com.twentygx.tgxcode.data.model.SudoAsk
 import com.twentygx.tgxcode.data.model.Draft
 import com.twentygx.tgxcode.data.model.DraftBody
 import com.twentygx.tgxcode.data.model.FlagsRequest
@@ -104,6 +105,10 @@ class AppViewModel(
 
     private val _answering = MutableStateFlow<Set<String>>(emptySet())
     val answering: StateFlow<Set<String>> = _answering.asStateFlow()
+
+    /** Sudo ask ids with an answer in flight — apart from [answering], so a permission card beside it stays live. */
+    private val _sudoAnswering = MutableStateFlow<Set<String>>(emptySet())
+    val sudoAnswering: StateFlow<Set<String>> = _sudoAnswering.asStateFlow()
 
     /** Task ids with a decision in flight, so their buttons can go quiet. */
     private val _acting = MutableStateFlow<Set<String>>(emptySet())
@@ -672,6 +677,22 @@ class AppViewModel(
         _answering.value = _answering.value + ask.requestId
         repo.answerTool(ask, decision)
         _answering.value = _answering.value - ask.requestId
+    }
+
+    /**
+     * Send a sudo password. [password] has already left the card's field; it is held
+     * here only until the request returns, and never logged — see `SudoLoggingTest`.
+     */
+    fun answerSudo(ask: SudoAsk, password: String) = viewModelScope.launch {
+        _sudoAnswering.value = _sudoAnswering.value + ask.id
+        repo.answerSudo(ask, password)
+        _sudoAnswering.value = _sudoAnswering.value - ask.id
+    }
+
+    fun denySudo(ask: SudoAsk) = viewModelScope.launch {
+        _sudoAnswering.value = _sudoAnswering.value + ask.id
+        repo.denySudo(ask)
+        _sudoAnswering.value = _sudoAnswering.value - ask.id
     }
 
     // ----------------------------------------------------------- orchestrators

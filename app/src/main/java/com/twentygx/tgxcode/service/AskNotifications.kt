@@ -14,6 +14,7 @@ import com.twentygx.tgxcode.R
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.AskKind
 import com.twentygx.tgxcode.data.model.Decision
+import com.twentygx.tgxcode.data.model.SudoAsk
 
 /**
  * Notifications for asks, and the ongoing notice for the connection.
@@ -128,6 +129,65 @@ object AskNotifications {
                 .build(),
         )
     }
+
+    /**
+     * The tag that keeps a sudo ask's notification apart from a permission ask's in the
+     * same session — same id, different tag, so both can be up, as both asks can.
+     */
+    private const val SUDO_TAG = "sudo"
+
+    /**
+     * A `sudo -A` waiting on your password, loud: nothing else can answer it, an
+     * orchestrator included.
+     *
+     * **No actions.** An action cannot take a password, and must never be made to carry
+     * one; even Deny is left to the card, as the desktop's notification leaves it. A tap
+     * opens the conversation, where the card is. The lock screen gets the public version,
+     * which does not show the command.
+     */
+    @SuppressLint("MissingPermission")
+    fun showSudo(context: Context, ask: SudoAsk, sessionTitle: String?) {
+        val sessionId = ask.sessionId ?: return
+        val manager = context.getSystemService<NotificationManager>() ?: return
+        val session = sessionTitle?.takeIf { it.isNotBlank() } ?: "A session"
+        val title = "$session — sudo needs your password"
+        val public = NotificationCompat.Builder(context, Channels.ASKS)
+            .setSmallIcon(R.drawable.ic_stat_ask)
+            .setContentTitle("sudo needs your password")
+            .build()
+
+        val builder = NotificationCompat.Builder(context, Channels.ASKS)
+            .setSmallIcon(R.drawable.ic_stat_ask)
+            .setContentTitle(title)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(sudoBody(ask)))
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(public)
+            .setAutoCancel(false)
+            .setContentIntent(openIntent(context, sessionId))
+            .apply {
+                ask.askedAt?.takeIf { it > 0 }?.let {
+                    setWhen(it)
+                    setShowWhen(true)
+                    setUsesChronometer(true)
+                }
+            }
+        manager.notify(SUDO_TAG, idFor(sessionId), builder.build())
+    }
+
+    fun cancelSudo(context: Context, sessionId: String) {
+        context.getSystemService<NotificationManager>()?.cancel(SUDO_TAG, idFor(sessionId))
+    }
+
+    /** `web/notifications.js`'s line: the command, and the shell warning. */
+    fun sudoBody(ask: SudoAsk): String = buildString {
+        append("sudo ")
+        append(ask.command.ifBlank { ask.line.removePrefix("sudo ") })
+        if (ask.runsShell) append(" — runs a shell")
+        if (ask.user != null && ask.user != "root") append(" (as ${ask.runsAs})")
+        if (ask.attempt > 1) append(" · try ${ask.attempt}")
+    }.take(160)
 
     private const val STALLED_ID_BASE = 3000
 

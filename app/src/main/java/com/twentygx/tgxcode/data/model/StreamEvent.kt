@@ -66,6 +66,23 @@ sealed interface StreamEvent {
         val outcome: String? = null,
     ) : StreamEvent
 
+    /** A `sudo -A` waiting on a password. Never carries one; no event does. */
+    @Serializable
+    data class SudoAsked(val ask: SudoAsk) : StreamEvent
+
+    /**
+     * `approved` (handed to sudo — a wrong one comes back as a new ask, `attempt` + 1),
+     * `denied` or `cancelled` (sudo exited, or the Bash call was stopped or timed out).
+     */
+    @Serializable
+    data class SudoResolved(
+        val id: String,
+        val requestId: String? = null,
+        val sessionId: String? = null,
+        val outcome: String? = null,
+        val reason: String? = null,
+    ) : StreamEvent
+
     @Serializable
     data class Notice(
         val sessionId: String? = null,

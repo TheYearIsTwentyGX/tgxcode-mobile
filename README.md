@@ -604,7 +604,61 @@ they now appear here, and where to find each one:
 | Attachments | the + beside the message box, and on the New tab; images and 📎 files in the transcript | Photo (the system photo picker) or File (the document picker), up to five a message; needs a bridge with [TGXCode#206](https://github.com/TheYearIsTwentyGX/TGXCode/pull/206), which lets a remote caller upload at a 10MB cap. Photos larger than 2048px or not PNG/JPEG/WebP are re-encoded as JPEG first, so a HEIC arrives as something the model can see. Drafts cannot hold files, so the New tab's Save refuses while any are attached |
 | Images | the conversation's ⋮ menu | `GET /api/sessions/:id/images`: every image once each, newest first, ×N on a repeat. Tap for a zoomable viewer that steps through each occurrence (‹ 1 of N ›); Jump to message scrolls to it, loading from the turn it sits in when it is above the window. Read only while open, and again 1.5s after the transcript grows or the runner changes state. The bytes come through `BridgeApi` with the token and Access headers and are kept on disk by key (they are named by their own sha256), so there is no image library |
 | Friendly MCP tool names | tool rows, ask cards, notifications, Needs-you, the orchestrator page | `core/ToolName.kt` is `web/tool-name.js` ported rule for rule (`mcp__tgxcode__set_summary` → *TGXCode: Set Summary*), pinned by `ToolNameTest` with the desktop's cases. Display only: matching reads the raw name, and the bridge's own `displayName` and `activity` are drawn as sent |
+| Sudo approval | a card above the ask slot in the conversation; Needs-you cards and orchestrator worker rows; a notification | an agent's `sudo -A`, answered with your password — see *Approving sudo* below. Needs a bridge with [TGXCode#246](https://github.com/TheYearIsTwentyGX/TGXCode/pull/246) |
 | Orchestrators | an orchestrator's conversation opens on **Overview** (beside a Conversation tab); "Start as an orchestrator" and "Send to orchestrator…" on the New tab and on each draft; ⋮ → Make it an orchestrator / Orchestrator settings | see *Orchestrators* below |
+
+### Approving sudo
+
+`web/transcript/sudo.js`'s card, from `docs/api.md` §*Approving sudo*. An agent that runs
+`sudo -A …` raises a **sudo ask** (`sudo-ask`, `runner.sudoAsk`, and a board card's `ask`
+with `kind: "sudo"` when nothing else is pending). The card shows what the bridge read
+from the waiting sudo process, not what the agent said: the exact command line
+(monospace, wrapping), who it runs as, where, the whole Bash command it is part of
+(folded when long — sudo remembers the password for the rest of that command), a
+**runs a shell** warning, and "try N of 3" after a wrong password. It is its own slot
+above the permission card, because both can be up at once, and it is answered to
+`/api/sudo/:id/answer|deny`, never `/permission`.
+
+| `sudo.allowRemote` | The card |
+|---|---|
+| on | a password field, **Approve** and **Deny** |
+| off | read-only, "Approve at the desktop", and **Deny** — refusing grants nothing, so the bridge always allows it |
+
+The pref comes from `GET /api/prefs` and the `prefs` event; until it is read, the ask's
+own `remoteAnswer` decides. A bridge that sees the phone as local (`/api/health`
+`remote: false`) takes the password whatever the switch says, as the desktop does. A
+`403 {remote: true}` (the switch turned off under the card) is said as "Approve at the
+desktop".
+
+**Where the password goes, and where it does not.**
+
+- It lives in Compose `remember` state — **not `rememberSaveable`**, whose Bundle the
+  system persists — until Approve, which reads it once into the request body and empties
+  the field first. Leaving the card empties it too. Nothing else holds it.
+- The field is `KeyboardType.Password` with auto-correct off, and the IME request gets
+  `IME_FLAG_NO_PERSONALIZED_LEARNING` added by an `InterceptPlatformTextInput` —
+  `KeyboardOptions` has no switch for it.
+- While any sudo card is on screen the window is `FLAG_SECURE` (no screenshots,
+  recordings or recents thumbnail) and the view is `IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS`,
+  so an autofill service never sees the field and has nothing to offer to save; the
+  autofill session is cancelled as the card goes.
+- It is sent through the same `BridgeApi` plumbing as every route, which logs method,
+  path and status, never a body. `SudoAnswerBody.toString()` is redacted in case one ever
+  reaches a log or a crash report. There is no OkHttp logging interceptor.
+  `SudoLoggingTest` drives a real request through `BridgeApi` and `BridgeRepository` on
+  every documented outcome and a dead connection, reads every log line through `Tgx.tap`,
+  and fails if the password is in any of them — or if it never reached the bridge.
+
+**The notification** (with *Stay connected* on) is high priority on the asks channel,
+tagged apart from the session's permission notification so both can be up. It has **no
+actions**: an action cannot take a password and must never be made to carry one, and the
+desktop's has none either. A tap opens the conversation, where the card is. The lock
+screen shows only "sudo needs your password". It is cancelled on `sudo-resolved`, and on
+reconnect when the board no longer shows that session waiting on anything.
+
+**The card comes down** on `sudo-resolved` (compared by id, so a wrong password's retry
+is not wiped by the old ask's resolution) or on any runner status without `sudoAsk` —
+every status carries the field, so polling and a missed event both converge.
 
 ### Orchestrators
 

@@ -40,7 +40,8 @@ data class BoardCard(
     val userMessages: Int = 0,
     val runner: CardRunner? = null,
     val live: LiveInfo? = null,
-    val ask: Ask? = null,
+    /** A permission ask, or a sudo one (`kind: "sudo"`) when that is all it waits on. */
+    val ask: @Serializable(with = BoardAskSerializer::class) Ask? = null,
     val headlines: List<Headline> = emptyList(),
     val tasks: TaskProgress? = null,
     val devservers: List<DevServer> = emptyList(),
@@ -83,6 +84,9 @@ data class BoardCard(
                 val what = when (it.askKind) {
                     AskKind.Plan -> "A plan to approve"
                     AskKind.Question -> "A question to answer"
+                    // `web/boards/taskboard.js`'s line, clipped the same.
+                    AskKind.Sudo -> "Wants your password for sudo " +
+                        (it.sudo?.command.orEmpty().let { c -> if (c.length > 50) c.take(49) + "…" else c })
                     else -> "Wants to run ${it.toolLabel}"
                 }
                 return if (askForOrchestrator) "$what — its orchestrator has it" else what

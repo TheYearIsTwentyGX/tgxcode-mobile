@@ -10,7 +10,11 @@ import kotlinx.serialization.Serializable
  * given at the desk and worn on the phone.
  */
 @Serializable
-data class Prefs(val projects: ProjectPrefs? = null)
+data class Prefs(
+    val projects: ProjectPrefs? = null,
+    /** Whether this phone may answer a sudo ask: [SudoPrefs.allowRemote]. */
+    val sudo: SudoPrefs? = null,
+)
 
 @Serializable
 data class ProjectPrefs(
