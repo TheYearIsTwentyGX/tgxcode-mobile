@@ -1,5 +1,6 @@
 package com.twentygx.tgxcode.data.model
 
+import com.twentygx.tgxcode.core.toolDisplayText
 import kotlinx.serialization.Serializable
 
 /**
@@ -61,7 +62,7 @@ data class ImageOccurrence(
                 source == "user" -> null
                 else -> "from a tool"
             }
-            return listOfNotNull(label?.takeIf { it.isNotBlank() }, where).joinToString(" · ").ifBlank { "Image" }
+            return listOfNotNull(label?.takeIf { it.isNotBlank() }?.let(::toolDisplayText), where).joinToString(" · ").ifBlank { "Image" }
         }
 }
 
@@ -104,7 +105,7 @@ fun imageSizeText(bytes: Long): String =
 
 /** What a tile says about itself: what it came from, its size, and how often it appeared. */
 fun ChatImage.describe(withLabel: Boolean = true): String = listOfNotNull(
-    label?.takeIf { withLabel && it.isNotBlank() },
+    label?.takeIf { withLabel && it.isNotBlank() }?.let(::toolDisplayText),
     if (width != null && height != null) "$width×$height" else null,
     imageSizeText(bytes),
     if (count > 1) "appears $count times" else null,

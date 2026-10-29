@@ -59,6 +59,8 @@ import com.twentygx.tgxcode.ui.theme.tgx
 fun ConversationScreen(
     conversation: Conversation?,
     expandedTools: Set<String>,
+    /** The "Expand thinking" setting: how a thinking block opens until it is tapped. */
+    thinkingExpanded: Boolean = true,
     onToggleTool: (String) -> Unit,
     draft: String,
     onDraftChanged: (String) -> Unit,
@@ -355,6 +357,7 @@ fun ConversationScreen(
                 EventItem(
                     event = event,
                     expanded = event.id in expandedTools,
+                    thinkingExpanded = thinkingExpanded,
                     onToggleTool = onToggleTool,
                     suggestions = suggestionActions?.let {
                         SuggestionSlot(

@@ -6,6 +6,7 @@ import com.twentygx.tgxcode.core.getOrNull
 import com.twentygx.tgxcode.core.isAccessDenied
 import com.twentygx.tgxcode.core.isUnauthorized
 import com.twentygx.tgxcode.core.message
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.background.BackgroundRules
 import com.twentygx.tgxcode.data.model.AttachmentRef
 import com.twentygx.tgxcode.data.model.AgentFollow
@@ -911,14 +912,14 @@ class BridgeRepository(
             // `web/app.js` does; the quota pill shows the state instead.
             is StreamEvent.Notice ->
                 if (event.level == "warn" && event.kind != "rate_limit") {
-                    event.text?.let { _messages.emit(UserMessage(it, isError = true)) }
+                    event.text?.let { _messages.emit(UserMessage(toolDisplayText(it), isError = true)) }
                 }
 
             is StreamEvent.TurnComplete ->
                 if (event.isError && event.sessionId == _conversation.value?.sessionId) {
                     _messages.emit(
                         UserMessage(
-                            event.detail ?: "The turn ended with an error",
+                            event.detail?.let(::toolDisplayText) ?: "The turn ended with an error",
                             isError = true,
                         ),
                     )

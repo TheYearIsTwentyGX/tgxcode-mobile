@@ -58,6 +58,7 @@ fun SettingsScreen(
     onForget: () -> Unit,
     onStayConnectedChanged: (Boolean) -> Unit,
     onInstallAppsChanged: (Boolean) -> Unit,
+    onThinkingExpandedChanged: (Boolean) -> Unit,
     onGrantInstallPermission: () -> Unit,
     modifier: Modifier = Modifier,
     /** Null until paired: the snippets live on the bridge, so there is nothing to edit before. */
@@ -278,6 +279,22 @@ fun SettingsScreen(
             ) { Text("Phone installs…") }
         }
 
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Expand thinking", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Show the model's thinking open in the transcript. Tap a block to " +
+                        "fold or open just that one.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tgx.textMuted,
+                )
+            }
+            Switch(checked = state.thinkingExpanded, onCheckedChange = onThinkingExpandedChanged)
+        }
+
         TextButton(onClick = onForget, modifier = Modifier.padding(top = 8.dp)) {
             Text("Forget this bridge", color = tgx.red)
         }
@@ -298,6 +315,7 @@ data class SettingsUiState(
     val stayConnected: Boolean = false,
     val installApps: Boolean = true,
     val canInstallApps: Boolean = false,
+    val thinkingExpanded: Boolean = com.twentygx.tgxcode.data.settings.DEFAULT_THINKING_EXPANDED,
 ) {
     /** One of the two Access fields without the other — never saved, never sent. */
     val accessHalfSet: Boolean get() = accessId.isBlank() != accessSecret.isBlank()

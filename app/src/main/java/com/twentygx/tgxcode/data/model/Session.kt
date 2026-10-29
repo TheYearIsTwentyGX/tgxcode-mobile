@@ -1,5 +1,6 @@
 package com.twentygx.tgxcode.data.model
 
+import com.twentygx.tgxcode.core.toolDisplayText
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -158,7 +159,7 @@ data class SessionSummary(
         get() {
             val state = runner?.state
             if (state == "busy" || state == "starting") return null
-            return standing?.text?.takeIf { it.isNotBlank() }
+            return standing?.text?.takeIf { it.isNotBlank() }?.let(::toolDisplayText)
         }
 
     val isStalled: Boolean get() = runner?.stalled == true

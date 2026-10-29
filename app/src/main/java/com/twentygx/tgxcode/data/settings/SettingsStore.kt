@@ -50,6 +50,22 @@ class SettingsStore(private val context: Context) {
         val BG_CHECK_AT = longPreferencesKey("bg_check_at")
         val BG_CHECK_RESULT = stringPreferencesKey("bg_check_result")
         val BG_BATTERY_ASKED = booleanPreferencesKey("bg_battery_asked")
+        /**
+         * App-local on purpose: the desktop's `transcript.thinkingExpanded` is its own
+         * screen's choice, and a phone reads a transcript differently.
+         */
+        val THINKING_EXPANDED = booleanPreferencesKey("thinking_expanded")
+    }
+
+    /**
+     * Whether thinking blocks open expanded. On by default ([thinkingExpandedOr]); a
+     * block can still be folded on its own either way.
+     */
+    val thinkingExpanded: Flow<Boolean> =
+        context.dataStore.data.map { thinkingExpandedOr(it[Keys.THINKING_EXPANDED]) }
+
+    suspend fun setThinkingExpanded(on: Boolean) {
+        context.dataStore.edit { it[Keys.THINKING_EXPANDED] = on }
     }
 
     val config: Flow<BridgeConfig?> = context.dataStore.data.map { prefs ->
@@ -161,3 +177,8 @@ class SettingsStore(private val context: Context) {
         }
     }
 }
+
+/** What an unset "Expand thinking" reads as: on. */
+const val DEFAULT_THINKING_EXPANDED = true
+
+fun thinkingExpandedOr(stored: Boolean?): Boolean = stored ?: DEFAULT_THINKING_EXPANDED

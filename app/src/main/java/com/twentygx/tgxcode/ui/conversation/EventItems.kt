@@ -25,6 +25,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.model.AgentDoneEvent
 import com.twentygx.tgxcode.data.model.AssistantEvent
 import com.twentygx.tgxcode.data.model.CompactEvent
@@ -83,6 +84,7 @@ fun EventItem(
     suggestions: SuggestionSlot? = null,
     userActions: UserTurnActions? = null,
     onOpenAgent: ((toolUseId: String, title: String?) -> Unit)? = null,
+    thinkingExpanded: Boolean = true,
 ) {
     val padded = modifier
         .fillMaxWidth()
@@ -101,7 +103,14 @@ fun EventItem(
                 MarkdownText(text, Modifier.fillMaxWidth())
             }
         }
-        is ThinkingEvent -> ThinkingBlock(event, padded)
+        // [expanded] is "the reader tapped it", which for thinking means "the other way
+        // from the setting" — one set, so it survives scrolling like a tool's does.
+        is ThinkingEvent -> ThinkingBlock(
+            event,
+            open = thinkingOpen(thinkingExpanded, expanded),
+            onToggle = { onToggleTool(event.id) },
+            modifier = padded,
+        )
         is ToolEvent -> ToolRow(
             event,
             expanded,
@@ -116,7 +125,7 @@ fun EventItem(
         is SystemEvent -> SystemChip(event, padded)
         is AgentDoneEvent -> {
             val text = "Subagent ${event.status ?: "finished"}" +
-                (event.summary?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: "")
+                (event.summary?.takeIf { it.isNotBlank() }?.let { " — ${toolDisplayText(it)}" } ?: "")
             val toolUseId = event.toolUseId
             if (onOpenAgent != null && event.hasTranscript && toolUseId != null) {
                 CentredNote(
@@ -225,18 +234,46 @@ private fun UserBubble(
 
 private val Arrangement_End = androidx.compose.foundation.layout.Arrangement.End
 
-/** Italic, faint, behind a left rule. Deliberately not markdown. */
+/**
+ * Whether a thinking block is open: the "Expand thinking" setting, flipped if the
+ * reader has tapped this block.
+ */
+fun thinkingOpen(expandByDefault: Boolean, toggled: Boolean): Boolean = expandByDefault != toggled
+
+/**
+ * Italic, faint, behind a left rule. Deliberately not markdown.
+ *
+ * Folded, it is one line — so a long transcript with the setting off lays out no
+ * thinking text at all, only the preview.
+ */
 @Composable
-private fun ThinkingBlock(event: ThinkingEvent, modifier: Modifier = Modifier) {
+private fun ThinkingBlock(
+    event: ThinkingEvent,
+    open: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val rule = tgx.outlineSoft
-    Box(
+    val text = event.text.orEmpty()
+    Column(
         modifier
+            .clickable(onClickLabel = if (open) "Fold thinking" else "Show thinking", onClick = onToggle)
             .drawBehind {
                 drawRect(rule, Offset.Zero, Size(2.dp.toPx(), size.height))
             }
             .padding(start = 10.dp),
     ) {
-        Text(event.text.orEmpty(), style = TgxType.thinking, color = tgx.textFaint)
+        if (open) {
+            Text(text, style = TgxType.thinking, color = tgx.textFaint)
+        } else {
+            Text(
+                "Thinking ▸ " + firstLine(text.trimStart(), 120),
+                style = TgxType.thinking,
+                color = tgx.textFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -255,7 +292,7 @@ private fun SystemChip(event: SystemEvent, modifier: Modifier = Modifier) {
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         Text(
-            event.text.orEmpty(),
+            toolDisplayText(event.text.orEmpty()),
             style = TgxType.mono125,
             color = if (event.isError) tgx.red else tgx.textMuted,
         )

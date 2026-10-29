@@ -50,6 +50,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.twentygx.tgxcode.core.ApiResult
 import com.twentygx.tgxcode.core.message
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.attach.ChatImageCache
 import com.twentygx.tgxcode.data.model.ChatImage
 import com.twentygx.tgxcode.data.model.ImageAnchor
@@ -252,7 +253,7 @@ private fun ImageViewer(
             ) {
                 Column(Modifier.weight(1f).padding(start = 8.dp)) {
                     Text(
-                        occurrence?.title ?: image.label ?: "Image",
+                        occurrence?.title ?: image.label?.let(::toolDisplayText) ?: "Image",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White,
                         maxLines = 1,
@@ -270,7 +271,7 @@ private fun ImageViewer(
 
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 when (val f = full) {
-                    is Thumb.Ready -> ZoomableImage(f.bitmap, image.label ?: "Image", Modifier.fillMaxSize())
+                    is Thumb.Ready -> ZoomableImage(f.bitmap, image.label?.let(::toolDisplayText) ?: "Image", Modifier.fillMaxSize())
                     Thumb.Loading -> Text("Loading…", color = Color.White.copy(alpha = 0.6f))
                     Thumb.Missing -> Text(
                         "This image is not available any more.",

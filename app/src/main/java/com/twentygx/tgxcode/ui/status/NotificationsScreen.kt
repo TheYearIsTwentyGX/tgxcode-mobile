@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.twentygx.tgxcode.core.ago
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.model.AskOutcome
 import com.twentygx.tgxcode.data.model.NotificationRow
 import com.twentygx.tgxcode.data.repo.Inbox
@@ -168,7 +169,7 @@ private fun NotificationItem(row: NotificationRow, onClick: (() -> Unit)?) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            row.summary?.takeIf { it.isNotBlank() }?.let {
+            row.summary?.takeIf { it.isNotBlank() }?.let(::toolDisplayText)?.let {
                 Text(
                     it,
                     style = TgxType.mono12,

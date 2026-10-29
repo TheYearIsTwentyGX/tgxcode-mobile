@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.net.Uri
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.attach.MAX_ATTACHMENTS
 import com.twentygx.tgxcode.data.attach.StagedFile
 import com.twentygx.tgxcode.data.attach.canSendWith
@@ -253,7 +254,7 @@ fun Composer(
     val queued = runner?.queue?.size?.takeIf { it > 0 } ?: runner?.queued?.takeIf { it > 0 }
     val held = runner?.pendingSettings
     val note = listOfNotNull(
-        runner?.activity?.takeIf { it.isNotBlank() },
+        runner?.activity?.takeIf { it.isNotBlank() }?.let(::toolDisplayText),
         runner?.stalled?.takeIf { it }?.let { "stalled" },
         held?.let {
             "held until background work ends: " +

@@ -1,5 +1,6 @@
 package com.twentygx.tgxcode.ui.orchestrator
 
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.BriefDecision
 import com.twentygx.tgxcode.data.model.InboxItem
@@ -428,7 +429,7 @@ fun stageLine(
     )
     Tone.Error -> WorkerLine("Stopped with an error", null)
     Tone.Run -> WorkerLine(
-        activity?.trim()?.removeSuffix("…")?.removeSuffix("...")?.takeIf { it.isNotBlank() }?.let { clip(it, 70) } ?: "Working",
+        activity?.let(::toolDisplayText)?.trim()?.removeSuffix("…")?.removeSuffix("...")?.takeIf { it.isNotBlank() }?.let { clip(it, 70) } ?: "Working",
         null,
     )
     Tone.Idle -> WorkerLine("Idle", lastReport(w, inbox)?.let { clip(firstLine(it.text), 70) }?.ifBlank { null })
@@ -496,7 +497,7 @@ fun inboxNudgeText(count: Int, counts: Map<String, Int>?, summary: String?): Str
     val what = counts?.entries?.filter { it.value > 0 }?.joinToString(", ") { (kind, n) ->
         val words = NUDGE_WORDS[kind]
         "$n ${if (words == null) kind else if (n == 1) words.first else words.second}"
-    }?.ifBlank { null } ?: summary?.takeIf { it.isNotBlank() }
+    }?.ifBlank { null } ?: summary?.takeIf { it.isNotBlank() }?.let(::toolDisplayText)
     return "$count item${if (count == 1) "" else "s"} waiting" + (what?.let { " — $it" } ?: "")
 }
 

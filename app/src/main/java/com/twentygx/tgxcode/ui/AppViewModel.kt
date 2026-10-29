@@ -203,6 +203,11 @@ class AppViewModel(
             }
         }
         viewModelScope.launch {
+            container.settings.thinkingExpanded.collect { on ->
+                _settingsUi.value = _settingsUi.value.copy(thinkingExpanded = on)
+            }
+        }
+        viewModelScope.launch {
             container.phoneInstalls.canInstall.collect { can ->
                 _settingsUi.value = _settingsUi.value.copy(canInstallApps = can)
             }
@@ -797,6 +802,10 @@ class AppViewModel(
 
     fun setInstallApps(on: Boolean) {
         container.phoneInstalls.setEnabled(on)
+    }
+
+    fun setThinkingExpanded(on: Boolean) = viewModelScope.launch {
+        container.settings.setThinkingExpanded(on)
     }
 
     /** The phone-installs queue, for the Installs screen. */
