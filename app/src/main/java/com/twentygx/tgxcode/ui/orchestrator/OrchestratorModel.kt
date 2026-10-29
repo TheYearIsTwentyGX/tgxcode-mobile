@@ -5,6 +5,7 @@ import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.BriefDecision
 import com.twentygx.tgxcode.data.model.InboxItem
 import com.twentygx.tgxcode.data.model.OrchestratorPayload
+import com.twentygx.tgxcode.data.model.OrchestratorSettings
 import com.twentygx.tgxcode.data.model.OrchestratorWorker
 import com.twentygx.tgxcode.data.model.PendingSpawn
 import com.twentygx.tgxcode.data.model.UsageStop
@@ -538,3 +539,39 @@ fun usageMeters(stop: UsageStop, used: Map<String, Double>): List<Meter> =
         if (type != "five_hour" && type != "seven_day" && cutoff == null) null
         else Meter(label, used[type], cutoff)
     }
+
+// ------------------------------------------------------------------- models
+
+/** A model id as a row says it: `claude-opus-4-1-20250805` → `opus-4-1`, an alias as is. */
+fun shortModel(model: String): String = model.removePrefix("claude-").replace(Regex("-\\d{8}$"), "")
+
+/**
+ * A worker's model and effort, as `web/orchestrator-model.js`'s `workerModelWords` says
+ * them — "haiku · low effort", "default model" for one started on inherit. [marker] is
+ * `fixed` when the worker setting overrode the orchestrator, `default` when the default
+ * for when it does not say filled the gap, for either half; null otherwise. Null on a
+ * row from a bridge that does not send `modelSource` and has no model or effort either.
+ */
+data class WorkerModelWords(val text: String, val marker: String?)
+
+fun workerModelWords(w: OrchestratorWorker): WorkerModelWords? {
+    val src = w.modelSource
+    if (src == null && w.model == null && w.effort == null) return null
+    val text = listOfNotNull(w.model?.let(::shortModel) ?: "default model", w.effort?.let { "$it effort" })
+        .joinToString(" · ")
+    val sources = listOfNotNull(src?.model, src?.effort)
+    val marker = when {
+        "fixed" in sources -> "fixed"
+        "default" in sources -> "default"
+        else -> null
+    }
+    return WorkerModelWords(text, marker)
+}
+
+/** The line under the model pickers, as the desktop popover's. [label] names a model id. */
+fun workerModelWords(settings: OrchestratorSettings, label: (String) -> String): String {
+    val choose = settings.workerModel == OrchestratorSettings.CHOOSE
+    val policy = if (choose) "It is told which models there are and when each fits, and picks per worker."
+    else "Every worker runs on ${label(settings.workerModel)}, whatever the orchestrator asks for — it is told when it was overridden."
+    return "$policy A task you hand it keeps the model you picked."
+}

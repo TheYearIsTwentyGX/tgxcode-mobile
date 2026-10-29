@@ -712,6 +712,12 @@ private fun WorkerRow(
             line.detail?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
+            workerModelWords(w)?.let { words ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(words.text, style = TgxType.mono12, color = colors.textFaint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    words.marker?.let { Tag(it, Modifier.padding(start = 6.dp)) }
+                }
+            }
             // The six stages as pips: passed ones filled, the current one large and in
             // the row's tone, the rest empty.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {

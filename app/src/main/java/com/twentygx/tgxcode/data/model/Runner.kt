@@ -1,5 +1,8 @@
 package com.twentygx.tgxcode.data.model
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 
 enum class RunnerState { Stopped, Starting, Idle, Busy, Error, Unknown }
@@ -103,13 +106,25 @@ data class RunnerStatus(
  * What the model and effort pickers offer, matching the desktop's `#model` and
  * `#effort` selects. `""` is `inherit` in both — no flag, so Claude Code decides.
  *
+ * Both lists come from [catalog], which the repository fills from `GET /api/models`
+ * on every attach — the one source the desktop's pickers use too. Until that answers
+ * it is [ModelsCatalog.FALLBACK].
+ *
  * A value the runner reports that is not in the list (a summary carries the full model
  * id the transcript recorded, `claude-opus-…`, not the alias) shows as `inherit`, as
  * the desktop's `paintModel` does: a picker cannot show an option it does not have.
  */
 object SessionChoices {
-    val MODELS = listOf("", "opus", "sonnet", "haiku", "fable")
-    val EFFORTS = listOf("", "low", "medium", "high", "xhigh", "max")
+    private val _catalog = MutableStateFlow(ModelsCatalog.FALLBACK)
+    val catalog: StateFlow<ModelsCatalog> = _catalog.asStateFlow()
+
+    fun setCatalog(value: ModelsCatalog) {
+        // An empty answer is a broken bridge, not "no models": keep what there was.
+        if (value.models.isNotEmpty() && value.efforts.isNotEmpty()) _catalog.value = value
+    }
+
+    val MODELS: List<String> get() = listOf("") + _catalog.value.modelIds
+    val EFFORTS: List<String> get() = listOf("") + _catalog.value.efforts
 
     fun knownModel(value: String?): String = value?.takeIf { it in MODELS }.orEmpty()
     fun knownEffort(value: String?): String = value?.takeIf { it in EFFORTS }.orEmpty()
