@@ -36,6 +36,8 @@ import com.twentygx.tgxcode.core.getOrNull
 import com.twentygx.tgxcode.data.model.Schedule
 import com.twentygx.tgxcode.data.model.SessionChoices
 import com.twentygx.tgxcode.data.net.BridgeApi
+import com.twentygx.tgxcode.ui.common.effortOptions
+import com.twentygx.tgxcode.ui.common.modelOptions
 import com.twentygx.tgxcode.ui.common.EmptyState
 import com.twentygx.tgxcode.ui.common.TgxSheet
 import com.twentygx.tgxcode.ui.conversation.PickerChip
@@ -328,9 +330,9 @@ private fun ScheduleEditor(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 PickerChip(form.mode, offered, ::modeLabel, { form = form.copy(mode = it) }, "Permission mode")
-                PickerChip(form.model, SessionChoices.MODELS, SessionChoices::label, { form = form.copy(model = it) }, "Model",
+                PickerChip(form.model, modelOptions(), SessionChoices::label, { form = form.copy(model = it) }, "Model",
                     chipLabel = { it.ifBlank { "Model" } })
-                PickerChip(form.effort, SessionChoices.EFFORTS, SessionChoices::label, { form = form.copy(effort = it) }, "Effort",
+                PickerChip(form.effort, effortOptions(), SessionChoices::label, { form = form.copy(effort = it) }, "Effort",
                     chipLabel = { it.ifBlank { "Effort" } })
             }
             Row(verticalAlignment = Alignment.CenterVertically) {

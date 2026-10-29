@@ -8,6 +8,7 @@ import com.twentygx.tgxcode.core.isUnauthorized
 import com.twentygx.tgxcode.core.message
 import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.background.BackgroundRules
+import com.twentygx.tgxcode.data.model.SessionChoices
 import com.twentygx.tgxcode.data.model.AttachmentRef
 import com.twentygx.tgxcode.data.model.AgentFollow
 import com.twentygx.tgxcode.data.model.Ask
@@ -1007,6 +1008,7 @@ class BridgeRepository(
      */
     private suspend fun resync() {
         refreshHealth()
+        loadModels()
         // Before the session list, deliberately. Both land on the same screen now, and
         // the board is the part that goes at the top — reading it second means the rows
         // render first and the cards arrive as a prepend, which a lazy list answers by
@@ -1233,6 +1235,11 @@ class BridgeRepository(
 
     suspend fun refreshHealth() {
         api.health().getOrNull()?.let { _health.value = it }
+    }
+
+    /** Every picker's options. Read on each attach: a bridge upgrade can change them. */
+    private suspend fun loadModels() {
+        api.models().getOrNull()?.let(SessionChoices::setCatalog)
     }
 
     /**

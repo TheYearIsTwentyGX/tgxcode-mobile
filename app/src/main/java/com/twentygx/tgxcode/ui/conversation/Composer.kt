@@ -48,6 +48,8 @@ import com.twentygx.tgxcode.data.model.Snippet
 import com.twentygx.tgxcode.data.model.SnippetGroup
 import com.twentygx.tgxcode.data.repo.fillSnippet
 import com.twentygx.tgxcode.data.repo.insertSnippet
+import com.twentygx.tgxcode.ui.common.effortOptions
+import com.twentygx.tgxcode.ui.common.modelOptions
 import com.twentygx.tgxcode.ui.theme.TgxType
 import com.twentygx.tgxcode.ui.theme.Metrics
 import com.twentygx.tgxcode.ui.theme.Pill
@@ -300,7 +302,7 @@ fun Composer(
             )
             PickerChip(
                 value = controls.model,
-                options = SessionChoices.MODELS,
+                options = modelOptions(),
                 label = SessionChoices::label,
                 onPick = controls.onModelChanged,
                 description = "Model",
@@ -308,7 +310,7 @@ fun Composer(
             )
             PickerChip(
                 value = controls.effort,
-                options = SessionChoices.EFFORTS,
+                options = effortOptions(),
                 label = SessionChoices::label,
                 onPick = controls.onEffortChanged,
                 description = "Effort",

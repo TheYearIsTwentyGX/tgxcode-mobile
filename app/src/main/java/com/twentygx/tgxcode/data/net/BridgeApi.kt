@@ -14,6 +14,7 @@ import com.twentygx.tgxcode.data.model.Changes
 import com.twentygx.tgxcode.data.model.CronDescription
 import com.twentygx.tgxcode.data.model.FileDiff
 import com.twentygx.tgxcode.data.model.Health
+import com.twentygx.tgxcode.data.model.ModelsCatalog
 import com.twentygx.tgxcode.data.model.LaterCreate
 import com.twentygx.tgxcode.data.model.LaterPatch
 import com.twentygx.tgxcode.data.model.LaterPayload
@@ -124,6 +125,9 @@ class BridgeApi(
      * [sessions] is for.
      */
     suspend fun health(): ApiResult<Health> = get("api/health", serializer())
+
+    /** The models and effort levels to offer. Open to a paired remote caller. */
+    suspend fun models(): ApiResult<ModelsCatalog> = get("api/models", serializer())
 
     suspend fun sessions(limit: Int = 200): ApiResult<SessionsResponse> =
         get("api/sessions", serializer(), "limit" to limit.toString())

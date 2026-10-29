@@ -29,6 +29,8 @@ import com.twentygx.tgxcode.data.model.BriefDecision
 import com.twentygx.tgxcode.data.model.InboxItem
 import com.twentygx.tgxcode.data.model.OpenTask
 import com.twentygx.tgxcode.data.model.SettingsPatch
+import com.twentygx.tgxcode.data.model.OrchestratorPayload
+import com.twentygx.tgxcode.data.model.OrchestratorSettings
 import com.twentygx.tgxcode.data.model.TaskFields
 import com.twentygx.tgxcode.data.net.BridgeConfig
 import com.twentygx.tgxcode.data.net.PairingInput
@@ -165,6 +167,9 @@ class AppViewModel(
     private var lease: AutoCloseable? = null
 
     init {
+        // An orchestrator's own model setting is the composer's top rung, so a payload
+        // landing or changing redraws the pickers.
+        viewModelScope.launch { orchestrators.payloads.collect { picks.intValue++ } }
         // Text the bridge handed back — a failed send, or what a stop took off the
         // queue — goes back in the box it came from, after anything already typed.
         viewModelScope.launch {
@@ -333,15 +338,30 @@ class AppViewModel(
             ?: "auto"
     }
 
+    /**
+     * On an orchestrator whose own setting decides it, a pick is saved as that setting
+     * — as the desktop does — so the picker and the settings sheet are one control.
+     * `inherit` there clears it, and the picker goes back to being an ordinary one.
+     */
     fun setModel(sessionId: String, model: String) {
         repo.setPendingModel(sessionId, model)
+        if (ownOrchestratorSettings(sessionId)?.orchestratorModel != null) {
+            saveOrchestratorSettings(sessionId, SettingsPatch(orchestratorModel = SettingsPatch.modelValue(model)))
+        }
         picks.intValue++
     }
 
     fun setEffort(sessionId: String, effort: String) {
         repo.setPendingEffort(sessionId, effort)
+        if (ownOrchestratorSettings(sessionId)?.orchestratorEffort != null) {
+            saveOrchestratorSettings(sessionId, SettingsPatch(orchestratorEffort = SettingsPatch.modelValue(effort)))
+        }
         picks.intValue++
     }
+
+    /** The settings of [sessionId] when it is an orchestrator whose payload is held. */
+    private fun ownOrchestratorSettings(sessionId: String): OrchestratorSettings? =
+        orchestrators.payloads.value[sessionId]?.takeIf { it.enabled }?.settings
 
     /**
      * The model picker's value — the desktop's `paintModel` ladder, top rung last.
@@ -352,6 +372,9 @@ class AppViewModel(
      */
     fun modelFor(sessionId: String): String {
         picks.intValue
+        // First, because the bridge enforces it: an orchestrator's own model setting
+        // starts its process whatever a send asks for.
+        ownOrchestratorSettings(sessionId)?.orchestratorModel?.let { return SessionChoices.knownModel(it) }
         repo.pendingModel(sessionId)?.let { return it }
         val open = repo.conversation.value?.takeIf { it.sessionId == sessionId }
         val runner = open?.runner
@@ -367,6 +390,7 @@ class AppViewModel(
      */
     fun effortFor(sessionId: String): String {
         picks.intValue
+        ownOrchestratorSettings(sessionId)?.orchestratorEffort?.let { return SessionChoices.knownEffort(it) }
         repo.pendingEffort(sessionId)?.let { return it }
         val runner = repo.conversation.value?.takeIf { it.sessionId == sessionId }?.runner
         runner?.pendingSettings?.let { return SessionChoices.knownEffort(it.effort) }
@@ -712,8 +736,11 @@ class AppViewModel(
         orchestrators.answerDecision(orchestratorId, decision, answer, mode)
     }
 
-    fun saveOrchestratorSettings(orchestratorId: String, patch: SettingsPatch) =
-        viewModelScope.launch { orchestrators.saveSettings(orchestratorId, patch) }
+    fun saveOrchestratorSettings(
+        orchestratorId: String,
+        patch: SettingsPatch,
+        onSaved: (OrchestratorPayload?) -> Unit = {},
+    ) = viewModelScope.launch { onSaved(orchestrators.saveSettings(orchestratorId, patch)) }
 
     fun resumeOrchestrator(orchestratorId: String) = viewModelScope.launch { orchestrators.resume(orchestratorId) }
 

@@ -924,6 +924,8 @@ fun TgxCodeRoot(
                 paused = payload.paused != null,
                 nowMillis = now,
                 onSave = { vm.saveOrchestratorSettings(id, it) },
+                // A failed save answers null; a saved one its `ownModelApplied`, "now" when nothing was held.
+                onSaveModel = { patch, done -> vm.saveOrchestratorSettings(id, patch) { p -> done(p?.let { it.ownModelApplied ?: "now" }) } },
                 onResume = { vm.resumeOrchestrator(id) },
                 onTurnOff = { orchSettingsFor = null; vm.stopOrchestrating(id) },
                 onDismiss = { orchSettingsFor = null },

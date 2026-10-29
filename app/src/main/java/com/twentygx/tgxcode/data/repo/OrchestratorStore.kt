@@ -153,15 +153,23 @@ class OrchestratorStore(
 
     // -------------------------------------------------------------- settings
 
-    suspend fun saveSettings(sessionId: String, patch: SettingsPatch): Boolean = busy("settings:$sessionId") {
+    /**
+     * Answers the saved payload, or null when it failed. Its `ownModelApplied` is
+     * `after-turn` when the orchestrator's own model changes only once it finishes the
+     * turn it is in, which is said here as the desktop toasts it.
+     */
+    suspend fun saveSettings(sessionId: String, patch: SettingsPatch): OrchestratorPayload? = busy("settings:$sessionId") {
         when (val result = api.putOrchestrator(sessionId, OrchestratorPut(settings = patch))) {
             is ApiResult.Ok -> {
                 put(result.value)
-                true
+                if (result.value.ownModelApplied == OWN_AFTER_TURN) {
+                    repo.report("Saved. The orchestrator switches when its current turn ends.")
+                }
+                result.value
             }
             else -> {
                 repo.report("Could not save the settings: ${result.message()}", isError = true)
-                false
+                null
             }
         }
     }
@@ -317,3 +325,6 @@ class OrchestratorStore(
  */
 internal fun decisionMessage(decision: BriefDecision, answer: String): String =
     "Re: ${decision.text.trim()}\n\n${answer.trim()}"
+
+/** `ownModelApplied` when the orchestrator is mid-turn. */
+const val OWN_AFTER_TURN = "after-turn"

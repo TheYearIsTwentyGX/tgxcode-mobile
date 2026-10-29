@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import android.net.Uri
 import com.twentygx.tgxcode.data.attach.MAX_ATTACHMENTS
 import com.twentygx.tgxcode.data.attach.StagedFile
+import com.twentygx.tgxcode.ui.common.effortOptions
+import com.twentygx.tgxcode.ui.common.modelOptions
 import com.twentygx.tgxcode.ui.conversation.AttachButton
 import com.twentygx.tgxcode.ui.conversation.AttachmentStrip
 import com.twentygx.tgxcode.core.ago
@@ -303,11 +305,11 @@ fun NewSessionScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Model", style = MaterialTheme.typography.labelMedium, color = tgx.textMuted)
-                ChoiceButton(model, SessionChoices.MODELS, onModelChanged)
+                ChoiceButton(model, modelOptions(), onModelChanged)
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Effort", style = MaterialTheme.typography.labelMedium, color = tgx.textMuted)
-                ChoiceButton(effort, SessionChoices.EFFORTS, onEffortChanged)
+                ChoiceButton(effort, effortOptions(), onEffortChanged)
             }
         }
 

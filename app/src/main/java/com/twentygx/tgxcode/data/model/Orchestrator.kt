@@ -3,7 +3,10 @@ package com.twentygx.tgxcode.data.model
 import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.core.toolDisplayName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * An orchestrator session and everything it is carrying — the whole
@@ -26,6 +29,12 @@ data class OrchestratorPayload(
     val unread: Int = 0,
     /** Newest first, at most 100 — a missing item is unknown, not never-happened. */
     val inbox: List<InboxItem> = emptyList(),
+    /**
+     * Only on the reply to a settings `PUT`: how a change to [OrchestratorSettings.orchestratorModel]
+     * or its effort took effect — `now`, `after-turn` (it is busy; the process is
+     * replaced when the turn ends) or null when nothing had to change.
+     */
+    val ownModelApplied: String? = null,
 )
 
 @Serializable
@@ -34,8 +43,24 @@ data class OrchestratorSettings(
     val maxRunning: Int = 3,
     /** Whether a worker gets a worktree of its own when nothing else decides. */
     val worktree: Boolean = true,
+    /**
+     * Its own process's model and effort. Null leaves them to the send — the composer's
+     * pick; set, it wins over whatever a send asks for, so the composer shows it.
+     */
+    val orchestratorModel: String? = null,
+    val orchestratorEffort: String? = null,
+    /** [CHOOSE] lets the orchestrator pick per worker; a model id or level fixes it. */
+    val workerModel: String = CHOOSE,
+    val workerEffort: String = CHOOSE,
+    /** Under [CHOOSE], what a worker gets when the orchestrator does not say; null is inherit. */
+    val workerDefaultModel: String? = null,
+    val workerDefaultEffort: String? = null,
     val usageStop: UsageStop = UsageStop(),
-)
+) {
+    companion object {
+        const val CHOOSE = "choose"
+    }
+}
 
 /**
  * The usage cutoff. With [window] `all`, each window in [limits] has its own threshold
@@ -173,11 +198,27 @@ data class OrchestratorWorker(
     val state: String = "idle",
     /** `tool`, `plan` or `question` — what it is blocked on, if anything. */
     val pending: String? = null,
+    /** What its process runs with, else what it was started with; null is inherit. */
+    val model: String? = null,
+    val effort: String? = null,
+    /** Where each came from at spawn; null on a worker started before the bridge said. */
+    val modelSource: ModelSource? = null,
     val pr: WorkerPr? = null,
     val origin: TaskOrigin? = null,
 ) {
     val closed: Boolean get() = closedAt != null
 }
+
+/**
+ * Where a worker's model and its effort each came from: `user` (the task's own pick),
+ * `fixed` (the worker setting), `orchestrator` (its `spawn_worker` argument),
+ * `default` (the setting for when it does not say) or `inherit`.
+ */
+@Serializable
+data class ModelSource(
+    val model: String? = null,
+    val effort: String? = null,
+)
 
 @Serializable
 data class PendingSpawn(
@@ -333,8 +374,24 @@ data class OrchestratorPut(
 data class SettingsPatch(
     val maxRunning: Int? = null,
     val worktree: Boolean? = null,
+    /**
+     * The six model fields are [JsonElement]s because null is a real value for four of
+     * them — "clear it" — and [AppJson] drops a Kotlin null. Build them with [modelValue].
+     */
+    val orchestratorModel: JsonElement? = null,
+    val orchestratorEffort: JsonElement? = null,
+    val workerModel: JsonElement? = null,
+    val workerEffort: JsonElement? = null,
+    val workerDefaultModel: JsonElement? = null,
+    val workerDefaultEffort: JsonElement? = null,
     val usageStop: UsageStopPatch? = null,
-)
+) {
+    companion object {
+        /** A picker's value on the wire: `""` (inherit) is a sent null, not an absent field. */
+        fun modelValue(value: String?): JsonElement =
+            value?.takeIf { it.isNotBlank() }?.let(::JsonPrimitive) ?: JsonNull
+    }
+}
 
 /**
  * A partial cutoff. [limits] is sent whole when sent: a `null` threshold in it is a
