@@ -34,6 +34,8 @@ import com.twentygx.tgxcode.ui.theme.tgx
 fun SubagentScreen(
     view: AgentView?,
     expandedTools: Set<String>,
+    /** The "Expand thinking" setting: how a thinking block opens until it is tapped. */
+    thinkingExpanded: Boolean = true,
     onToggleTool: (String) -> Unit,
     onOpenAgent: (toolUseId: String, title: String?) -> Unit,
     modifier: Modifier = Modifier,
@@ -79,6 +81,7 @@ fun SubagentScreen(
                 EventItem(
                     event = event,
                     expanded = event.id in expandedTools,
+                    thinkingExpanded = thinkingExpanded,
                     onToggleTool = onToggleTool,
                     modifier = if (index == 0) Modifier.padding(top = 12.dp) else Modifier,
                     onOpenAgent = onOpenAgent,

@@ -1,5 +1,6 @@
 package com.twentygx.tgxcode.data.model
 
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.core.AppJson
 import com.twentygx.tgxcode.core.toolDisplayName
 import kotlinx.serialization.Serializable
@@ -58,7 +59,7 @@ data class Ask(
         }
 
     /** The bridge's own friendly name when it sent one; the raw [tool] stays for matching. */
-    val toolLabel: String get() = displayName ?: tool?.let(::toolDisplayName) ?: "a tool"
+    val toolLabel: String get() = displayName?.let(::toolDisplayText) ?: tool?.let(::toolDisplayName) ?: "a tool"
 
     /** The plan's markdown, for a `plan` ask. */
     val planMarkdown: String?

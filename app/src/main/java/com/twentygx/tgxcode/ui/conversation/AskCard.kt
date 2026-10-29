@@ -32,6 +32,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.core.waitingFor
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.AskKind
@@ -236,7 +237,7 @@ private fun AskCard(
 @Composable
 private fun ColumnScope.ToolBody(ask: Ask) {
     Text(ask.toolLabel, style = MaterialTheme.typography.bodyLarge)
-    ask.reason?.takeIf { it.isNotBlank() }?.let {
+    ask.reason?.takeIf { it.isNotBlank() }?.let(::toolDisplayText)?.let {
         Text(it, style = MaterialTheme.typography.bodySmall, color = tgx.textMuted)
     }
     Box(

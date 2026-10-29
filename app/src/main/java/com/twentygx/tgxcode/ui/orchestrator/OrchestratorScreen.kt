@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.AskKind
 import com.twentygx.tgxcode.data.model.BriefDecision
@@ -844,7 +845,8 @@ private fun InboxRow(item: InboxItem, payload: OrchestratorPayload, busy: Boolea
                 }
             }
         }
-        val text = item.text.ifBlank { "(empty)" }
+        // A `permission` row is the bridge's sentence around a raw tool name.
+        val text = toolDisplayText(item.text).ifBlank { "(empty)" }
         if (open) {
             MarkdownText(text, Modifier.fillMaxWidth().padding(top = 4.dp, end = Metrics.ScreenPadding))
         } else {

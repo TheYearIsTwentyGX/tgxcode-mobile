@@ -1,5 +1,6 @@
 package com.twentygx.tgxcode.data.model
 
+import com.twentygx.tgxcode.core.toolDisplayText
 import kotlinx.serialization.Serializable
 
 /** Why a card is on the board. The bridge has already ordered by this. */
@@ -91,7 +92,7 @@ data class BoardCard(
                 }
                 return if (askForOrchestrator) "$what — its orchestrator has it" else what
             }
-            runner?.activity?.takeIf { it.isNotBlank() }?.let { return it }
+            runner?.activity?.takeIf { it.isNotBlank() }?.let { return toolDisplayText(it) }
             return when (boardReason) {
                 BoardReason.Ask -> "Waiting for you"
                 BoardReason.Error -> "Stopped with an error"
@@ -111,14 +112,14 @@ data class BoardCard(
      * headline, and printing the sentence twice wastes the row it is competing for.
      */
     val headline: String?
-        get() = headlines.lastOrNull()?.text
+        get() = headlines.lastOrNull()?.text?.let(::toolDisplayText)
             ?.takeIf { it.isNotBlank() && it.trim() != why.trim() }
 
     val taskLine: String?
         get() = tasks?.takeIf { it.total > 0 }?.let { t ->
             buildString {
                 append("${t.done} of ${t.total} done")
-                t.current?.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+                t.current?.takeIf { it.isNotBlank() }?.let { append(" · ").append(toolDisplayText(it)) }
             }
         }
 }

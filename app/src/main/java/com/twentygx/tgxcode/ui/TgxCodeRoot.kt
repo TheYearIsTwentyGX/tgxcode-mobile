@@ -659,6 +659,7 @@ fun TgxCodeRoot(
                                 modifier = Modifier.weight(1f),
                                 conversation = conversation?.takeIf { it.sessionId == route.sessionId },
                                 expandedTools = vm.expandedTools,
+                                thinkingExpanded = settingsUi.thinkingExpanded,
                                 onToggleTool = vm::toggleTool,
                                 draft = draft,
                                 onDraftChanged = vm::setDraft,
@@ -746,6 +747,7 @@ fun TgxCodeRoot(
                         SubagentScreen(
                             view = agentView?.takeIf { it.toolUseId == route.toolUseId },
                             expandedTools = vm.expandedTools,
+                            thinkingExpanded = settingsUi.thinkingExpanded,
                             onToggleTool = vm::toggleTool,
                             onOpenAgent = { toolUseId, title ->
                                 vm.openAgent(route.sessionId, toolUseId, title)
@@ -802,6 +804,7 @@ fun TgxCodeRoot(
                             onForget = vm::forget,
                             onStayConnectedChanged = onStayConnected,
                             onInstallAppsChanged = vm::setInstallApps,
+                            onThinkingExpandedChanged = { vm.setThinkingExpanded(it) },
                             onGrantInstallPermission = vm::grantInstallPermission,
                             onOpenSnippets = { nav.navigate(Snippets) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },
                             onOpenInstalls = { nav.navigate(Installs) }.takeIf { !connection.isRefused && connection != ConnState.Unconfigured },

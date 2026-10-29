@@ -10,9 +10,9 @@ package com.twentygx.tgxcode.core
  *
  * **Display only.** Everything that *matches* on a tool name — a permission rule, a
  * notification's dedupe, the orchestrator's own tools — keeps reading the raw name.
- * And text the bridge has already made friendly (an ask's `displayName`, a runner's
- * `activity`) is drawn as it came; this leaves a friendly string unchanged anyway,
- * because nothing friendly starts with `mcp__`.
+ * Text the bridge composed around a name (an ask's `displayName`, a runner's
+ * `activity`, a notification's summary) goes through [toolDisplayText], which
+ * converts each `mcp__…` token inside it and leaves the rest alone.
  */
 
 /**
@@ -76,4 +76,20 @@ fun toolDisplayName(name: String): String {
     val at = rest.indexOf("__")
     if (at <= 0 || at + 2 >= rest.length) return name
     return "${serverName(rest.substring(0, at))}: ${words(rest.substring(at + 2))}"
+}
+
+/**
+ * An `mcp__…` token standing on its own: not the tail of a longer identifier, and
+ * ending on a name character so a sentence's closing `-` stays outside it.
+ */
+private val MCP_TOKEN = Regex("(?<![A-Za-z0-9_])mcp__[A-Za-z0-9_-]*[A-Za-z0-9_]")
+
+/**
+ * [toolDisplayName] for every tool name *inside* a string — for text the bridge
+ * composed around one, like a runner's "Running mcp__tgxcode__next_message…" or an
+ * image's label. Text with no `mcp__` in it comes back as the same instance.
+ */
+fun toolDisplayText(text: String): String {
+    if (!text.contains("mcp__")) return text
+    return MCP_TOKEN.replace(text) { toolDisplayName(it.value) }
 }
