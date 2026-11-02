@@ -3,6 +3,7 @@ package com.twentygx.tgxcode.ui.orchestrator
 import com.twentygx.tgxcode.core.toolDisplayText
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.BriefDecision
+import com.twentygx.tgxcode.ui.markdown.markdownToPlainText
 import com.twentygx.tgxcode.data.model.InboxItem
 import com.twentygx.tgxcode.data.model.OrchestratorPayload
 import com.twentygx.tgxcode.data.model.OrchestratorSettings
@@ -426,7 +427,7 @@ fun stageLine(
     }
     Tone.You -> WorkerLine(
         "Waiting on you",
-        decision?.let { clip(it.text, 60) + " · " + shortAge(now - it.at) },
+        decision?.let { clip(markdownToPlainText(it.text).replace(Regex("\\s*\\n\\s*"), " "), 60) + " · " + shortAge(now - it.at) },
     )
     Tone.Error -> WorkerLine("Stopped with an error", null)
     Tone.Run -> WorkerLine(

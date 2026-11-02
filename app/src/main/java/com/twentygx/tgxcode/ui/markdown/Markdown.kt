@@ -6,6 +6,8 @@ import androidx.compose.ui.Modifier
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
+import com.mikepenz.markdown.model.MarkdownColors
+import com.mikepenz.markdown.model.MarkdownTypography
 import com.mikepenz.markdown.model.rememberMarkdownState
 import com.twentygx.tgxcode.ui.theme.TgxType
 import com.twentygx.tgxcode.ui.theme.tgx
@@ -32,8 +34,6 @@ fun MarkdownText(
     text: String,
     modifier: Modifier = Modifier,
 ) {
-    val heading = MaterialTheme.typography.bodyLarge
-
     /**
      * Parsed on this thread, during composition — not on a background dispatcher a
      * frame or two later.
@@ -63,28 +63,37 @@ fun MarkdownText(
     Markdown(
         markdownState = state,
         modifier = modifier,
-        colors = markdownColor(
-            text = MaterialTheme.colorScheme.onSurface,
-            codeBackground = tgx.s2,
-            inlineCodeBackground = tgx.s2,
-            dividerColor = tgx.outlineSoft,
-            tableBackground = tgx.s2,
-        ),
-        typography = markdownTypography(
-            h1 = heading,
-            h2 = heading,
-            h3 = heading,
-            h4 = heading,
-            h5 = heading,
-            h6 = heading,
-            text = MaterialTheme.typography.bodyMedium,
-            paragraph = MaterialTheme.typography.bodyMedium,
-            ordered = MaterialTheme.typography.bodyMedium,
-            bullet = MaterialTheme.typography.bodyMedium,
-            list = MaterialTheme.typography.bodyMedium,
-            code = TgxType.mono12,
-            inlineCode = TgxType.mono125,
-            quote = MaterialTheme.typography.bodyMedium,
-        ),
+        colors = tgxMarkdownColors(),
+        typography = tgxMarkdownTypography(),
+    )
+}
+
+@Composable
+internal fun tgxMarkdownColors(): MarkdownColors = markdownColor(
+    text = MaterialTheme.colorScheme.onSurface,
+    codeBackground = tgx.s2,
+    inlineCodeBackground = tgx.s2,
+    dividerColor = tgx.outlineSoft,
+    tableBackground = tgx.s2,
+)
+
+@Composable
+internal fun tgxMarkdownTypography(): MarkdownTypography {
+    val heading = MaterialTheme.typography.bodyLarge
+    return markdownTypography(
+        h1 = heading,
+        h2 = heading,
+        h3 = heading,
+        h4 = heading,
+        h5 = heading,
+        h6 = heading,
+        text = MaterialTheme.typography.bodyMedium,
+        paragraph = MaterialTheme.typography.bodyMedium,
+        ordered = MaterialTheme.typography.bodyMedium,
+        bullet = MaterialTheme.typography.bodyMedium,
+        list = MaterialTheme.typography.bodyMedium,
+        code = TgxType.mono12,
+        inlineCode = TgxType.mono125,
+        quote = MaterialTheme.typography.bodyMedium,
     )
 }
