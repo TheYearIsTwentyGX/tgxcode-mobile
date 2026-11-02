@@ -605,8 +605,44 @@ they now appear here, and where to find each one:
 | Images | the conversation's ⋮ menu | `GET /api/sessions/:id/images`: every image once each, newest first, ×N on a repeat. Tap for a zoomable viewer that steps through each occurrence (‹ 1 of N ›); Jump to message scrolls to it, loading from the turn it sits in when it is above the window. Read only while open, and again 1.5s after the transcript grows or the runner changes state. The bytes come through `BridgeApi` with the token and Access headers and are kept on disk by key (they are named by their own sha256), so there is no image library |
 | Friendly MCP tool names | tool rows, ask cards, notifications, Needs-you, the orchestrator page | `core/ToolName.kt` is `web/tool-name.js` ported rule for rule (`mcp__tgxcode__set_summary` → *TGXCode: Set Summary*), pinned by `ToolNameTest` with the desktop's cases. Display only: matching reads the raw name, and the bridge's own `displayName` and `activity` are drawn as sent |
 | Sudo approval | a card above the ask slot in the conversation; Needs-you cards and orchestrator worker rows; a notification | an agent's `sudo -A`, answered with your password — see *Approving sudo* below. Needs a bridge with [TGXCode#246](https://github.com/TheYearIsTwentyGX/TGXCode/pull/246) |
+| Secret asks | a card in the conversation; Needs-you cards and worker rows; a notification | an agent's `request_secret`, read-only with Deny until `secrets.allowRemote` is on at the desk — see *Secret asks* below. Needs a bridge with [TGXCode#255](https://github.com/TheYearIsTwentyGX/TGXCode/pull/255) |
 | Orchestrators | an orchestrator's conversation opens on **Overview** (beside a Conversation tab); "Start as an orchestrator" and "Send to orchestrator…" on the New tab and on each draft; ⋮ → Make it an orchestrator / Orchestrator settings | see *Orchestrators* below |
 | Orchestrator models | ⋮ → Orchestrator settings; the composer's pickers on an orchestrator; worker rows | the orchestrator's own model and effort (*Composer decides* or one fixed), the workers' (*Let the orchestrator choose* or one fixed) and, under choose, a default for when it doesn't. Each saves as it changes; a change held for a busy turn says so. With its own model set, the composer shows it and a pick there saves the setting, as the desktop does. Worker rows show model · effort, tagged *fixed* or *default* from `modelSource`. Every model and effort picker in the app is built from `GET /api/models`. Needs a bridge with [TGXCode#248](https://github.com/TheYearIsTwentyGX/TGXCode/pull/248) |
+
+### Secret asks
+
+`web/transcript/secret.js`'s card, from `docs/api.md` §*Secrets*. An agent that calls
+`request_secret` raises a **secret ask** (`secret-ask`, `runner.secretAsk`, and a board
+card's `ask` with `kind: "secret"` when nothing else is pending). The card shows the name,
+the agent's reason, labelled as the agent's, and the project it is saved under. Answers go
+to `/api/secrets/asks/:id/answer|deny`, never `/permission`.
+
+| What holds | The card |
+|---|---|
+| origin not encrypted | read-only, says so, and **Deny**. Checked first |
+| `secrets.allowRemote` off, **the default** | read-only, "Turn on in Settings → Secrets at your desk", and **Deny** |
+| the name was set while the ask waited | read-only, and **Deny**: a phone never replaces a value |
+| otherwise | a masked field, **Save** and **Deny** |
+
+**It is off by default because Cloudflare can read what crosses the tunnel.** Through
+`tgxcode.com` the value is encrypted on the network, but Cloudflare terminates TLS. The
+desk's Settings page says so beside the switch; see `docs/remote.md`.
+
+**Encrypted is this app's own check**, `BridgeConfig.encryptedOrigin`: HTTPS, loopback, or
+the tailnet. The network security config cannot be relied on for it, because the debug
+overlay allows cleartext to the LAN and a debug build is what gets installed. It is checked
+on the card and again in `BridgeApi.answerSecret`, before any socket.
+
+**Where the value goes, and where it does not**: exactly as for a sudo password, below.
+`remember`, never `rememberSaveable`; emptied before the send and when the card leaves, so
+a failed send means typing it again; `FLAG_SECURE` and no autofill while a card is
+composed; the keyboard asked not to learn. `SecretLoggingTest` drives every outcome through
+the real API and reads every log line. The notification has no actions and no `RemoteInput`,
+and the lock screen says only "An agent wants a secret". Two things this cannot do: wipe a
+JVM string, and clear a value you pasted from the clipboard.
+
+**With nothing connected an ask is denied at once**, by the bridge, so a phone that was
+offline never sees it. A phone holding the stream counts as watching.
 
 ### Approving sudo
 

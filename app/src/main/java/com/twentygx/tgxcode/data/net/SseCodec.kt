@@ -15,6 +15,7 @@ import com.twentygx.tgxcode.data.model.Prefs
 import com.twentygx.tgxcode.data.model.PrsPayload
 import com.twentygx.tgxcode.data.model.RunnerStatus
 import com.twentygx.tgxcode.data.model.StreamEvent
+import com.twentygx.tgxcode.data.model.SecretAsk
 import com.twentygx.tgxcode.data.model.SudoAsk
 import kotlinx.serialization.serializer
 
@@ -49,6 +50,8 @@ object SseCodec {
             StreamEvent.PermissionRequested(AppJson.decodeFromString(serializer<Ask>(), data))
         "sudo-ask" ->
             StreamEvent.SudoAsked(AppJson.decodeFromString(serializer<SudoAsk>(), data))
+        "secret-ask" ->
+            StreamEvent.SecretAsked(AppJson.decodeFromString(serializer<SecretAsk>(), data))
         "prs-changed" ->
             StreamEvent.PrsChanged(AppJson.decodeFromString(serializer<PrsPayload>(), data))
         "task-list" ->
@@ -75,6 +78,7 @@ object SseCodec {
         "session-deleted" -> AppJson.decodeFromString<StreamEvent.SessionDeleted>(data)
         "permission-resolved" -> AppJson.decodeFromString<StreamEvent.PermissionResolved>(data)
         "sudo-resolved" -> AppJson.decodeFromString<StreamEvent.SudoResolved>(data)
+        "secret-resolved" -> AppJson.decodeFromString<StreamEvent.SecretResolved>(data)
         "notice" -> AppJson.decodeFromString<StreamEvent.Notice>(data)
         "turn-complete" -> AppJson.decodeFromString<StreamEvent.TurnComplete>(data)
         "send-failed" -> AppJson.decodeFromString<StreamEvent.SendFailed>(data)

@@ -38,6 +38,8 @@ import com.twentygx.tgxcode.data.model.Decision
 import com.twentygx.tgxcode.data.model.Overview
 import com.twentygx.tgxcode.ui.common.AskButton
 import com.twentygx.tgxcode.ui.common.AskButtonKind
+import com.twentygx.tgxcode.ui.conversation.SecretActions
+import com.twentygx.tgxcode.ui.conversation.SecretCard
 import com.twentygx.tgxcode.ui.conversation.SudoActions
 import com.twentygx.tgxcode.ui.conversation.SudoCard
 import com.twentygx.tgxcode.ui.theme.Metrics
@@ -67,6 +69,7 @@ fun LazyListScope.needsSection(
     onOpen: (String) -> Unit,
     onAnswer: (Ask, String) -> Unit,
     sudo: SudoActions? = null,
+    secret: SecretActions? = null,
 ) {
     val cards = board?.sessions.orEmpty()
     if (cards.isEmpty()) return
@@ -92,6 +95,7 @@ fun LazyListScope.needsSection(
                 onOpen = onOpen,
                 onAnswer = onAnswer,
                 sudo = sudo,
+                secret = secret,
                 modifier = padding,
             )
         } else {
@@ -101,6 +105,7 @@ fun LazyListScope.needsSection(
                 onOpen = { onOpen(card.sessionId) },
                 onAnswer = onAnswer,
                 sudo = sudo,
+                secret = secret,
                 modifier = padding,
             )
         }
@@ -124,6 +129,7 @@ private fun OrchestratorBoardCard(
     onOpen: (String) -> Unit,
     onAnswer: (Ask, String) -> Unit,
     sudo: SudoActions?,
+    secret: SecretActions?,
     modifier: Modifier = Modifier,
 ) {
     val colors = tgx
@@ -179,7 +185,7 @@ private fun OrchestratorBoardCard(
 
         val shown = if (more || workers.size <= WORKERS_SHOWN + 1) workers else workers.take(WORKERS_SHOWN)
         shown.forEach { w ->
-            WorkerBoardRow(w, busy = w.ask?.requestId in answering, onOpen = { onOpen(w.sessionId) }, onAnswer = onAnswer, sudo = sudo)
+            WorkerBoardRow(w, busy = w.ask?.requestId in answering, onOpen = { onOpen(w.sessionId) }, onAnswer = onAnswer, sudo = sudo, secret = secret)
         }
         if (workers.size > WORKERS_SHOWN + 1) {
             Text(
@@ -256,6 +262,7 @@ private fun WorkerBoardRow(
     onOpen: () -> Unit,
     onAnswer: (Ask, String) -> Unit,
     sudo: SudoActions?,
+    secret: SecretActions?,
 ) {
     val colors = tgx
     val dot = when {
@@ -296,6 +303,8 @@ private fun WorkerBoardRow(
             if (ask.askKind == AskKind.Sudo && sudoAsk != null && sudo != null) {
                 // Never the orchestrator's to answer: it has no password to give.
                 SudoCard(sudoAsk.copy(sessionId = sudoAsk.sessionId ?: card.sessionId), sudo, compact = true)
+            } else if (ask.askKind == AskKind.Secret && ask.secret != null && secret != null) {
+                SecretCard(ask.secret.copy(sessionId = ask.secret.sessionId ?: card.sessionId), secret, compact = true)
             } else if (ask.askKind == AskKind.Tool) {
                 val stamped = ask.copy(sessionId = ask.sessionId ?: card.sessionId)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -348,6 +357,7 @@ fun BoardCardItem(
     onAnswer: (Ask, String) -> Unit,
     modifier: Modifier = Modifier,
     sudo: SudoActions? = null,
+    secret: SecretActions? = null,
 ) {
     val colors = tgx
     val accent = when (card.boardReason) {
@@ -433,6 +443,9 @@ fun BoardCardItem(
             // Answerable here, as on the desktop's boards: the card shows everything
             // the conversation's does, and the password goes from this field.
             SudoCard(sudoAsk.copy(sessionId = sudoAsk.sessionId ?: card.sessionId), sudo, compact = true)
+            AskButton("Open the session", onOpen)
+        } else if (ask?.askKind == AskKind.Secret && ask.secret != null && secret != null) {
+            SecretCard(ask.secret.copy(sessionId = ask.secret.sessionId ?: card.sessionId), secret, compact = true)
             AskButton("Open the session", onOpen)
         } else if (ask != null && ask.askKind == AskKind.Tool) {
             // A tool ask is answerable from the card: `{requestId, decision}` is the

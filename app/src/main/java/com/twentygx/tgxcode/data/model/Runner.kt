@@ -70,6 +70,8 @@ data class RunnerStatus(
      * be set at once. Every status carries it, so its absence takes the card down.
      */
     val sudoAsk: SudoAsk? = null,
+    /** A secret an agent asked for by name. The same: its absence takes the card down. */
+    val secretAsk: SecretAsk? = null,
     val canPrompt: Boolean = true,
     val busySince: Long? = null,
     /**

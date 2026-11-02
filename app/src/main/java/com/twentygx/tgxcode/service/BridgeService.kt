@@ -15,6 +15,7 @@ import com.twentygx.tgxcode.data.background.BackgroundRules
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.AskKind
 import com.twentygx.tgxcode.data.model.Overview
+import com.twentygx.tgxcode.data.model.SecretAsk
 import com.twentygx.tgxcode.data.model.SudoAsk
 import com.twentygx.tgxcode.data.model.StreamEvent
 import com.twentygx.tgxcode.data.repo.BridgeRepository
@@ -65,6 +66,9 @@ class BridgeService : Service() {
 
     /** Sudo asks with a notification up, by session. Apart from [shown]: both can be up. */
     private val sudoShown = mutableMapOf<String, SudoAsk>()
+
+    /** Secret asks with a notification up, by session. */
+    private val secretShown = mutableMapOf<String, SecretAsk>()
 
     /**
      * Whether a fresh ask on [sessionId] is its orchestrator's to answer. The board says
@@ -233,6 +237,20 @@ class BridgeService : Service() {
                             AskNotifications.cancelSudo(context, id)
                         }
                     }
+                    // Never quiet either: an orchestrator is never asked for a secret.
+                    is StreamEvent.SecretAsked -> {
+                        val ask = event.ask
+                        val id = ask.sessionId ?: return@collect
+                        secretShown[id] = ask
+                        AskNotifications.showSecret(context, ask, repo.titleOf(id))
+                    }
+                    is StreamEvent.SecretResolved -> {
+                        val id = event.sessionId ?: return@collect
+                        if (secretShown[id]?.id == event.id) {
+                            secretShown.remove(id)
+                            AskNotifications.cancelSecret(context, id)
+                        }
+                    }
                     else -> Unit
                 }
             }
@@ -240,13 +258,15 @@ class BridgeService : Service() {
 
         repo.board.collectLatest { board ->
             if (board == null) return@collectLatest
-            // A sudo ask rides the same `ask` slot, but is answered elsewhere and notified
-            // apart; `AskNotifications.show` would offer Allow for it against /permission.
+            // A sudo or secret ask rides the same `ask` slot, but is answered elsewhere and
+            // notified apart; `AskNotifications.show` would offer Allow for it against
+            // /permission.
             val blocked = board.sessions.mapNotNull { card ->
-                card.ask?.takeIf { it.askKind != AskKind.Sudo }
+                card.ask?.takeIf { it.askKind != AskKind.Sudo && it.askKind != AskKind.Secret }
                     ?.let { card.sessionId to it.copy(sessionId = card.sessionId) }
             }.toMap()
             reconcileSudo(board, repo, context)
+            reconcileSecret(board, repo, context)
             val carriedNow = board.sessions.filter { it.askForOrchestrator }.map { it.sessionId }.toSet()
 
             // Raise anything the board knows about that we missed — and say aloud a
@@ -287,6 +307,23 @@ class BridgeService : Service() {
         for (sessionId in sudoShown.keys.filter { cards[it]?.ask == null }) {
             AskNotifications.cancelSudo(context, sessionId)
             sudoShown.remove(sessionId)
+        }
+    }
+
+    /** [reconcileSudo] for a secret ask, which rides the same slot on the same terms. */
+    private fun reconcileSecret(board: Overview, repo: BridgeRepository, context: Context) {
+        val cards = board.sessions.associateBy { it.sessionId }
+        for (card in board.sessions) {
+            val secret = card.ask?.secret?.takeIf { card.ask.askKind == AskKind.Secret } ?: continue
+            if (secretShown[card.sessionId]?.id != secret.id) {
+                val stamped = secret.copy(sessionId = card.sessionId)
+                secretShown[card.sessionId] = stamped
+                AskNotifications.showSecret(context, stamped, repo.titleOf(card.sessionId))
+            }
+        }
+        for (sessionId in secretShown.keys.filter { cards[it]?.ask == null }) {
+            AskNotifications.cancelSecret(context, sessionId)
+            secretShown.remove(sessionId)
         }
     }
 
@@ -350,6 +387,8 @@ class BridgeService : Service() {
         shown.clear()
         sudoShown.keys.forEach { AskNotifications.cancelSudo(this, it) }
         sudoShown.clear()
+        secretShown.keys.forEach { AskNotifications.cancelSecret(this, it) }
+        secretShown.clear()
         super.onDestroy()
     }
 

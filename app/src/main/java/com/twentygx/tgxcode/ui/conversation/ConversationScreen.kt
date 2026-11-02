@@ -101,6 +101,8 @@ fun ConversationScreen(
     onNotice: (String) -> Unit = {},
     /** Answers a sudo ask; absent only in a preview. */
     sudo: SudoActions? = null,
+    /** Answers a secret ask; absent only in a preview. */
+    secret: SecretActions? = null,
 ) {
     if (conversation == null) {
         // A just-created session is not readable until Claude Code has written its
@@ -379,6 +381,14 @@ fun ConversationScreen(
             SudoCard(sudoAsk, sudo, Modifier.padding(10.dp), nowMillis = nowMillis)
         } else if (conversation.ask == null) {
             conversation.sudoOutcome?.let { SudoOutcomeLine(it) }
+        }
+
+        // Its own slot too: it is answered to `/api/secrets`, never to `/permission`.
+        val secretAsk = conversation.secretAsk
+        if (secretAsk != null && secret != null) {
+            SecretCard(secretAsk, secret, Modifier.padding(10.dp), nowMillis = nowMillis)
+        } else if (conversation.ask == null) {
+            conversation.secretOutcome?.let { SudoOutcomeLine(it) }
         }
 
         AskSlot(

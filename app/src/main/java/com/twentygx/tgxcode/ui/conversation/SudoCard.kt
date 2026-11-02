@@ -302,7 +302,7 @@ private fun Fact(label: String, value: String) {
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun NoLearningTextInput(content: @Composable () -> Unit) {
+internal fun NoLearningTextInput(content: @Composable () -> Unit) {
     InterceptPlatformTextInput(
         interceptor = { request, next ->
             next.startInputMethod(
@@ -319,7 +319,7 @@ private fun NoLearningTextInput(content: @Composable () -> Unit) {
 
 /**
  * `FLAG_SECURE` on the window, and the window's views out of autofill, for as long as
- * any sudo card is composed — counted, because the board can draw several at once.
+ * any sudo or secret card is composed — counted, because the board can draw several at once.
  *
  * Secure keeps the card out of screenshots, screen recording and the recents thumbnail.
  * Excluding the view from autofill means the password field is never in the structure

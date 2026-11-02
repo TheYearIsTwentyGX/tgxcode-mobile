@@ -15,6 +15,7 @@ import com.twentygx.tgxcode.data.attach.canSendWith
 import com.twentygx.tgxcode.data.attach.readyRefs
 import com.twentygx.tgxcode.data.attach.tooBig
 import com.twentygx.tgxcode.data.model.Ask
+import com.twentygx.tgxcode.data.model.SecretAsk
 import com.twentygx.tgxcode.data.model.SudoAsk
 import com.twentygx.tgxcode.data.model.Draft
 import com.twentygx.tgxcode.data.model.DraftBody
@@ -111,6 +112,10 @@ class AppViewModel(
     /** Sudo ask ids with an answer in flight — apart from [answering], so a permission card beside it stays live. */
     private val _sudoAnswering = MutableStateFlow<Set<String>>(emptySet())
     val sudoAnswering: StateFlow<Set<String>> = _sudoAnswering.asStateFlow()
+
+    /** Secret ask ids with an answer in flight. */
+    private val _secretAnswering = MutableStateFlow<Set<String>>(emptySet())
+    val secretAnswering: StateFlow<Set<String>> = _secretAnswering.asStateFlow()
 
     /** Task ids with a decision in flight, so their buttons can go quiet. */
     private val _acting = MutableStateFlow<Set<String>>(emptySet())
@@ -722,6 +727,22 @@ class AppViewModel(
         _sudoAnswering.value = _sudoAnswering.value + ask.id
         repo.denySudo(ask)
         _sudoAnswering.value = _sudoAnswering.value - ask.id
+    }
+
+    /**
+     * Send a secret's value. [value] has already left the card's field; it is held here
+     * only until the request returns, and never logged — see `SecretLoggingTest`.
+     */
+    fun answerSecret(ask: SecretAsk, value: String) = viewModelScope.launch {
+        _secretAnswering.value = _secretAnswering.value + ask.id
+        repo.answerSecret(ask, value)
+        _secretAnswering.value = _secretAnswering.value - ask.id
+    }
+
+    fun denySecret(ask: SecretAsk) = viewModelScope.launch {
+        _secretAnswering.value = _secretAnswering.value + ask.id
+        repo.denySecret(ask)
+        _secretAnswering.value = _secretAnswering.value - ask.id
     }
 
     // ----------------------------------------------------------- orchestrators

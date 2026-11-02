@@ -40,6 +40,7 @@ import com.twentygx.tgxcode.ui.common.prBadgeOf
 import com.twentygx.tgxcode.ui.common.prBadgeWords
 import com.twentygx.tgxcode.ui.common.rowStateOf
 import com.twentygx.tgxcode.ui.needs.SectionHeader
+import com.twentygx.tgxcode.ui.conversation.SecretActions
 import com.twentygx.tgxcode.ui.conversation.SudoActions
 import com.twentygx.tgxcode.ui.needs.needsSection
 import com.twentygx.tgxcode.ui.theme.Metrics
@@ -74,6 +75,8 @@ fun SessionsScreen(
     onAnswer: (Ask, String) -> Unit,
     /** Answers a board card's sudo ask. */
     sudo: SudoActions? = null,
+    /** Answers a board card's secret ask. */
+    secret: SecretActions? = null,
     /**
      * The whole `GET /api/prs` payload rather than a pre-derived map: `gh.error` is
      * the wording for a grey glyph, so the rows need it too.
@@ -174,7 +177,7 @@ fun SessionsScreen(
                 item(key = "list-anchor") { Spacer(Modifier.height(0.dp)) }
 
                 if (!searching && !showArchived) {
-                    needsSection(board, answering, onOpen, onAnswer, sudo)
+                    needsSection(board, answering, onOpen, onAnswer, sudo, secret)
                 }
 
                 // The heading earns its place only when there is something above it to

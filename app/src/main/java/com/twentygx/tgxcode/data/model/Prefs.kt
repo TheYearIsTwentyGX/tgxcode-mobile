@@ -14,6 +14,8 @@ data class Prefs(
     val projects: ProjectPrefs? = null,
     /** Whether this phone may answer a sudo ask: [SudoPrefs.allowRemote]. */
     val sudo: SudoPrefs? = null,
+    /** Whether this phone may answer a secret ask: [SecretPrefs.allowRemote]. */
+    val secrets: SecretPrefs? = null,
 )
 
 @Serializable

@@ -44,6 +44,22 @@ data class BridgeConfig(
 
     val origin: String get() = "${baseUrl.scheme}://${baseUrl.host}" +
         if (baseUrl.port != HttpUrl.defaultPort(baseUrl.scheme)) ":${baseUrl.port}" else ""
+
+    /**
+     * Whether what is sent here stays off the network in clear text: HTTPS, this device's
+     * own loopback (`adb reverse`, or an emulator's view of its host), or the tailnet,
+     * which WireGuard encrypts whatever the scheme says.
+     *
+     * The app's own check, not the network security config's: the release config forbids
+     * cleartext, but the debug overlay allows it to the LAN and the tailnet, and a debug
+     * build is what gets installed.
+     */
+    val encryptedOrigin: Boolean
+        get() = baseUrl.scheme == "https" || baseUrl.host in LOOPBACK || baseUrl.host.endsWith(".ts.net")
+
+    private companion object {
+        val LOOPBACK = setOf("127.0.0.1", "localhost", "::1", "10.0.2.2")
+    }
 }
 
 /**
