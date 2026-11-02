@@ -57,6 +57,13 @@ class StatusStore(
     private val _sudoAllowRemote = MutableStateFlow<Boolean?>(null)
     val sudoAllowRemote: StateFlow<Boolean?> = _sudoAllowRemote.asStateFlow()
 
+    /**
+     * `secrets.allowRemote` — whether this phone may send a secret. Null until prefs are
+     * read, when the ask's own `remoteAnswer` decides. Pushed on every change.
+     */
+    private val _secretsAllowRemote = MutableStateFlow<Boolean?>(null)
+    val secretsAllowRemote: StateFlow<Boolean?> = _secretsAllowRemote.asStateFlow()
+
     private val _refreshingQuota = MutableStateFlow(false)
     val refreshingQuota: StateFlow<Boolean> = _refreshingQuota.asStateFlow()
 
@@ -81,6 +88,7 @@ class StatusStore(
     private fun applyPrefs(prefs: Prefs) {
         _projectColors.value = prefs.projects?.colors.orEmpty()
         prefs.sudo?.let { _sudoAllowRemote.value = it.allowRemote }
+        prefs.secrets?.let { _secretsAllowRemote.value = it.allowRemote }
     }
 
     suspend fun loadQuota() {

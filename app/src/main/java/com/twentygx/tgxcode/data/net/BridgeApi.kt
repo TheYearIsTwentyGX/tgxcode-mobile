@@ -70,6 +70,7 @@ import com.twentygx.tgxcode.data.model.StopResponse
 import com.twentygx.tgxcode.data.model.SubscribeRequest
 import com.twentygx.tgxcode.data.model.SuggestionActRequest
 import com.twentygx.tgxcode.data.model.SuggestionsResponse
+import com.twentygx.tgxcode.data.model.SecretAnswerBody
 import com.twentygx.tgxcode.data.model.SudoAnswerBody
 import com.twentygx.tgxcode.data.model.TaskStatus
 import com.twentygx.tgxcode.data.model.UploadedAttachment
@@ -862,6 +863,37 @@ class BridgeApi(
     ): ApiResult<T> = execute(deserializer, clients.api) { config ->
         Request.Builder().url(config.url(path)).delete().build()
     }
+
+    /** [BridgeConfig.encryptedOrigin] of the bridge in use. False with none, which sends nothing either. */
+    fun encryptedOrigin(): Boolean = configProvider()?.encryptedOrigin == true
+
+    /** The host a request goes to, for saying so on a card. */
+    fun originHost(): String? = configProvider()?.baseUrl?.host
+
+    /**
+     * Save a value for the secret ask [id] — `POST /api/secrets/asks/:id/answer`.
+     *
+     * **Refuses here, before any socket, when the origin is not encrypted.** The bridge
+     * refuses too, but by then the value has crossed the network, so its refusal cannot
+     * be the one that protects it. The card checks first as well; this holds if it is
+     * stale. Otherwise through the same [post] as every route, which logs the method, the
+     * path and the status and never a body. `SecretLoggingTest` holds that.
+     *
+     * `403 {remote: true}` while `secrets.allowRemote` is off; `409` when it was already
+     * answered or has gone, or `409 {exists: true}` when the name was set meanwhile, which
+     * a phone never replaces.
+     */
+    suspend fun answerSecret(id: String, value: String): ApiResult<JsonObject> {
+        if (!encryptedOrigin()) {
+            Tgx.w("secret answer not sent: the origin is not encrypted")
+            return ApiResult.Http(0, "This connection is not encrypted, so the secret was not sent")
+        }
+        return post("api/secrets/asks/${id.encoded()}/answer", SecretAnswerBody(value), serializer())
+    }
+
+    /** Refuse it. Open to a remote caller whatever `allowRemote` says: refusing grants nothing. */
+    suspend fun denySecret(id: String): ApiResult<JsonObject> =
+        post("api/secrets/asks/${id.encoded()}/deny", JsonObject(emptyMap()), serializer())
 
     private suspend fun <T> execute(
         deserializer: KSerializer<T>,

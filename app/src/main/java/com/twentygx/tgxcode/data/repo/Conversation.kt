@@ -5,6 +5,7 @@ import com.twentygx.tgxcode.data.model.GhReach
 import com.twentygx.tgxcode.data.model.PrDetail
 import com.twentygx.tgxcode.data.model.RunnerStatus
 import com.twentygx.tgxcode.data.model.SessionSummary
+import com.twentygx.tgxcode.data.model.SecretAsk
 import com.twentygx.tgxcode.data.model.SudoAsk
 import com.twentygx.tgxcode.data.model.SuggestionDecision
 import com.twentygx.tgxcode.data.model.TaskList
@@ -40,6 +41,10 @@ data class Conversation(
     val sudoAsk: SudoAsk? = null,
     /** How the last sudo ask ended, for the line left where its card was. */
     val sudoOutcome: String? = null,
+    /** A secret the agent asked for by name, answered to `/api/secrets`. Follows `runner.secretAsk`. */
+    val secretAsk: SecretAsk? = null,
+    /** How the last secret ask ended, for the line left where its card was. */
+    val secretOutcome: String? = null,
     val loading: Boolean = false,
     /**
      * What was already decided about each `suggestion` event here, keyed by its id.
@@ -228,5 +233,20 @@ fun Conversation.withSudoFrom(status: RunnerStatus?): Conversation {
         next?.id == sudoAsk?.id && next?.attempt == sudoAsk?.attempt -> this
         next == null -> copy(sudoAsk = null, sudoOutcome = sudoOutcome ?: sudoAsk?.let { "sudo — Answered." })
         else -> copy(sudoAsk = next, sudoOutcome = null)
+    }
+}
+
+/**
+ * [Conversation.secretAsk] from a whole runner status, which always carries `secretAsk`.
+ * Gone from the status is gone, whether or not `secret-resolved` made it here. The same
+ * ask can change under the card (`exists` turns true when the name is set meanwhile), so
+ * this compares the whole ask rather than its id.
+ */
+fun Conversation.withSecretFrom(status: RunnerStatus?): Conversation {
+    val next = status?.secretAsk?.copy(sessionId = sessionId)
+    return when {
+        next == secretAsk -> this
+        next == null -> copy(secretAsk = null, secretOutcome = secretOutcome ?: secretAsk?.let { "${it.name} — Answered." })
+        else -> copy(secretAsk = next, secretOutcome = null)
     }
 }

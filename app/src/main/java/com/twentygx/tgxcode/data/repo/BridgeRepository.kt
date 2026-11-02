@@ -32,6 +32,8 @@ import com.twentygx.tgxcode.data.model.restartOutcomeOf
 import com.twentygx.tgxcode.data.model.SessionSummary
 import com.twentygx.tgxcode.data.model.StreamEvent
 import com.twentygx.tgxcode.data.model.SubscribeRequest
+import com.twentygx.tgxcode.data.model.SecretOutcome
+import com.twentygx.tgxcode.data.model.SecretAsk
 import com.twentygx.tgxcode.data.model.SudoAsk
 import com.twentygx.tgxcode.data.model.SudoOutcome
 import com.twentygx.tgxcode.data.model.SuggestedTask
@@ -768,7 +770,7 @@ class BridgeRepository(
             ask != null && ask.requestId != showing -> open.copy(runner = runner, ask = ask, lastOutcome = null)
             ask == null && showing != null -> open.copy(runner = runner, ask = null, lastOutcome = "answered")
             else -> open.copy(runner = runner)
-        }.let { if (runner != null) it.withSudoFrom(runner) else it }
+        }.let { if (runner != null) it.withSudoFrom(runner).withSecretFrom(runner) else it }
 
         if (ask != null && ask.requestId != showing) {
             _askEvents.emit(StreamEvent.PermissionRequested(ask))
@@ -787,6 +789,15 @@ class BridgeRepository(
                 _askEvents.emit(StreamEvent.SudoAsked(sudo))
             } else if (sudo == null && sudoShowing != null) {
                 _askEvents.emit(StreamEvent.SudoResolved(sudoShowing, sudoShowing, sessionId, null))
+            }
+            val secret = runner.secretAsk?.copy(sessionId = sessionId)
+            val secretShowing = open.secretAsk
+            if (secret != null && secret.id != secretShowing?.id) {
+                _askEvents.emit(StreamEvent.SecretAsked(secret))
+            } else if (secret == null && secretShowing != null) {
+                _askEvents.emit(
+                    StreamEvent.SecretResolved(secretShowing.id, secretShowing.id, sessionId, secretShowing.name, null),
+                )
             }
         }
     }
@@ -840,7 +851,7 @@ class BridgeRepository(
                         // path that catches one raised before we attached.
                         ask = open.ask ?: event.status.pendingPermission
                             ?.copy(sessionId = id),
-                    ).withSudoFrom(event.status)
+                    ).withSudoFrom(event.status).withSecretFrom(event.status)
                 }
             }
 
@@ -865,6 +876,28 @@ class BridgeRepository(
                         _conversation.value = open.copy(
                             sudoAsk = null,
                             sudoOutcome = SudoOutcome.word(event.outcome, event.reason),
+                        )
+                    }
+                }
+            }
+
+            // The same for a secret ask. Never carries a value — no event does.
+            is StreamEvent.SecretAsked -> {
+                val id = event.ask.sessionId ?: return
+                _askEvents.emit(event)
+                currentIf(id)?.let { open ->
+                    _conversation.value = open.copy(secretAsk = event.ask, secretOutcome = null)
+                }
+            }
+
+            is StreamEvent.SecretResolved -> {
+                _askEvents.emit(event)
+                val id = event.sessionId ?: return
+                currentIf(id)?.let { open ->
+                    if (open.secretAsk?.id == event.id) {
+                        _conversation.value = open.copy(
+                            secretAsk = null,
+                            secretOutcome = SecretOutcome.word(event.name, event.outcome, event.reason),
                         )
                     }
                 }
@@ -1434,6 +1467,7 @@ class BridgeRepository(
                             ask = detail.runner?.pendingPermission?.copy(sessionId = sessionId),
                             // And the sudo that predates it, likewise unstamped.
                             sudoAsk = detail.runner?.sudoAsk?.copy(sessionId = sessionId),
+                            secretAsk = detail.runner?.secretAsk?.copy(sessionId = sessionId),
                             suggestions = detail.suggestions,
                         ).applyEvents(detail.events, detail.offset)
                         subscribe()
@@ -1529,6 +1563,7 @@ class BridgeRepository(
                     runner = result.value.runner ?: open.runner,
                     ask = open.ask,
                     sudoAsk = open.sudoAsk,
+                    secretAsk = open.secretAsk,
                     suggestions = result.value.suggestions,
                     // Carried forward for the same reason `runner` is: this rebuilds
                     // the conversation from scratch, and `/api/sessions/:id` knows
@@ -1856,6 +1891,44 @@ class BridgeRepository(
             )
             false
         }
+        else -> {
+            _messages.emit(UserMessage("$failure: ${result.message()}", isError = true))
+            false
+        }
+    }
+
+    /** Whether a value may be sent to the bridge in use — [BridgeApi.encryptedOrigin]. */
+    fun encryptedOrigin(): Boolean = api.encryptedOrigin()
+
+    /** The host a value would go through, for the card to say. */
+    fun originHost(): String? = api.originHost()
+
+    /**
+     * Send the value for a secret ask. The caller has already cleared its field; this
+     * holds the string only for the length of the request.
+     *
+     * @return true when the card should stay down (saved, or answered elsewhere).
+     */
+    suspend fun answerSecret(ask: SecretAsk, value: String): Boolean =
+        settleSecret(api.answerSecret(ask.id, value), "Could not save it")
+
+    /** Deny a secret ask. Open to a remote caller whatever `allowRemote` says. */
+    suspend fun denySecret(ask: SecretAsk): Boolean =
+        settleSecret(api.denySecret(ask.id), "Could not deny it")
+
+    private suspend fun settleSecret(result: ApiResult<JsonObject>, failure: String): Boolean = when {
+        result is ApiResult.Ok -> true
+        result is ApiResult.Http && result.status == 409 -> {
+            // `exists` is a refusal, with the ask still open; otherwise it is already over.
+            val refused = result.body?.contains("\"exists\"") == true
+            _messages.emit(
+                if (refused) UserMessage(result.message(), isError = true)
+                else UserMessage("Already answered somewhere else"),
+            )
+            !refused
+        }
+        // The bridge's own sentence, which never contains the value: the switch turned off
+        // under the card, an origin it would not take, or something else going wrong.
         else -> {
             _messages.emit(UserMessage("$failure: ${result.message()}", isError = true))
             false

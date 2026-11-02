@@ -49,7 +49,9 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.twentygx.tgxcode.data.model.secretCardMode
 import com.twentygx.tgxcode.data.model.sudoCardMode
+import com.twentygx.tgxcode.ui.conversation.SecretActions
 import com.twentygx.tgxcode.ui.conversation.SudoActions
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -157,6 +159,8 @@ fun TgxCodeRoot(
     val answering by vm.answering.collectAsStateWithLifecycle()
     val sudoAnswering by vm.sudoAnswering.collectAsStateWithLifecycle()
     val sudoAllowRemote by vm.status.sudoAllowRemote.collectAsStateWithLifecycle()
+    val secretAnswering by vm.secretAnswering.collectAsStateWithLifecycle()
+    val secretsAllowRemote by vm.status.secretsAllowRemote.collectAsStateWithLifecycle()
     val settingsUi by vm.settingsUi.collectAsStateWithLifecycle()
     val newSession by vm.newSession.collectAsStateWithLifecycle()
     val tasks by vm.repo.tasks.collectAsStateWithLifecycle()
@@ -205,6 +209,18 @@ fun TgxCodeRoot(
             answering = sudoAnswering,
             onApprove = vm::answerSudo,
             onDeny = vm::denySudo,
+        )
+    }
+
+    // The same for a secret card. The origin is read as the card is drawn, so re-pairing
+    // to another bridge cannot leave a field up that the new one should not have.
+    val secretActions = remember(secretAnswering, secretsAllowRemote, health?.remote) {
+        SecretActions(
+            mode = { ask -> secretCardMode(ask, health?.remote, secretsAllowRemote, vm.repo.encryptedOrigin()) },
+            via = { vm.repo.originHost() },
+            answering = secretAnswering,
+            onSave = vm::answerSecret,
+            onDeny = vm::denySecret,
         )
     }
 
@@ -514,6 +530,7 @@ fun TgxCodeRoot(
                                 onOpen = { nav.navigate(Conversation(it)) },
                                 onAnswer = { ask, decision -> vm.answerFromBoard(ask, decision) },
                                 sudo = sudoActions,
+                                secret = secretActions,
                                 prs = prs,
                                 onOptions = vm::openSessionSheet,
                                 showArchived = showArchived,
@@ -679,6 +696,7 @@ fun TgxCodeRoot(
                                 onStop = { vm.stop(route.sessionId) },
                                 onAnswer = { body -> vm.answer(route.sessionId, body) },
                                 sudo = sudoActions,
+                                secret = secretActions,
                                 onLoadAll = vm::loadAll,
                                 onOpenUrl = openUrl,
                                 starting = opening == route.sessionId,

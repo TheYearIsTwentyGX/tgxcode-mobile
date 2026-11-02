@@ -14,6 +14,7 @@ import com.twentygx.tgxcode.R
 import com.twentygx.tgxcode.data.model.Ask
 import com.twentygx.tgxcode.data.model.AskKind
 import com.twentygx.tgxcode.data.model.Decision
+import com.twentygx.tgxcode.data.model.SecretAsk
 import com.twentygx.tgxcode.data.model.SudoAsk
 
 /**
@@ -188,6 +189,57 @@ object AskNotifications {
         if (ask.user != null && ask.user != "root") append(" (as ${ask.runsAs})")
         if (ask.attempt > 1) append(" · try ${ask.attempt}")
     }.take(160)
+
+    private const val SECRET_TAG = "secret"
+
+    /**
+     * An agent asking for a secret by name, loud: nothing else can answer it.
+     *
+     * **No actions and no `RemoteInput`**, so a value is never typed into the system's
+     * notification UI, which keeps a reply's text. Tapping opens the session, and the card
+     * is where a value is entered. The lock screen says only that something was asked for:
+     * [secretBody] is the agent's own words, so it stays behind the unlock.
+     */
+    @SuppressLint("MissingPermission")
+    fun showSecret(context: Context, ask: SecretAsk, sessionTitle: String?) {
+        val sessionId = ask.sessionId ?: return
+        val manager = context.getSystemService<NotificationManager>() ?: return
+        val session = sessionTitle?.takeIf { it.isNotBlank() } ?: "A session"
+        val public = NotificationCompat.Builder(context, Channels.ASKS)
+            .setSmallIcon(R.drawable.ic_stat_ask)
+            .setContentTitle(SECRET_LOCKED_TITLE)
+            .build()
+
+        val builder = NotificationCompat.Builder(context, Channels.ASKS)
+            .setSmallIcon(R.drawable.ic_stat_ask)
+            .setContentTitle("$session — wants a secret")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(secretBody(ask)))
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(public)
+            .setAutoCancel(false)
+            .setContentIntent(openIntent(context, sessionId))
+            .apply {
+                ask.askedAt?.takeIf { it > 0 }?.let {
+                    setWhen(it)
+                    setShowWhen(true)
+                    setUsesChronometer(true)
+                }
+            }
+        manager.notify(SECRET_TAG, idFor(sessionId), builder.build())
+    }
+
+    fun cancelSecret(context: Context, sessionId: String) {
+        context.getSystemService<NotificationManager>()?.cancel(SECRET_TAG, idFor(sessionId))
+    }
+
+    /** What the lock screen shows: no name, no reason. */
+    const val SECRET_LOCKED_TITLE = "An agent wants a secret"
+
+    /** The name, and the agent's reason. An ask has no field a value could ride in. */
+    fun secretBody(ask: SecretAsk): String =
+        (ask.name + ask.why.takeIf { it.isNotBlank() }?.let { " — $it" }.orEmpty()).take(240)
 
     private const val STALLED_ID_BASE = 3000
 

@@ -83,6 +83,21 @@ sealed interface StreamEvent {
         val reason: String? = null,
     ) : StreamEvent
 
+    /** An agent asked for a secret by name. Never carries a value; no event does. */
+    @Serializable
+    data class SecretAsked(val ask: SecretAsk) : StreamEvent
+
+    /** `saved`, `denied` or `cancelled` (the agent's tool call went away). */
+    @Serializable
+    data class SecretResolved(
+        val id: String,
+        val requestId: String? = null,
+        val sessionId: String? = null,
+        val name: String? = null,
+        val outcome: String? = null,
+        val reason: String? = null,
+    ) : StreamEvent
+
     @Serializable
     data class Notice(
         val sessionId: String? = null,

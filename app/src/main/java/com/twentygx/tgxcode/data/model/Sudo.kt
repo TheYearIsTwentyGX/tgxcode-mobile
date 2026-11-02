@@ -119,20 +119,21 @@ fun sudoCardMode(ask: SudoAsk, remote: Boolean?, allowRemote: Boolean?): SudoCar
     if (remote == false || (allowRemote ?: ask.remoteAnswer)) SudoCardMode.Approve else SudoCardMode.ReadOnly
 
 /**
- * A board card's `ask`, which is a [SudoAsk] when `kind` is `sudo`.
+ * A board card's `ask`, which is a [SudoAsk] when `kind` is `sudo` and a [SecretAsk] when
+ * it is `secret`.
  *
- * The board has one `ask` slot for both kinds, so the sudo fields would otherwise be
- * dropped by [Ask]'s decoder. This copies the whole object into [Ask.sudo] before
- * decoding, so a card keeps everything the sudo card draws.
+ * The board has one `ask` slot for every kind, so their own fields would otherwise be
+ * dropped by [Ask]'s decoder. This copies the whole object into [Ask.sudo] or [Ask.secret]
+ * before decoding, so a card keeps everything its card draws.
  */
 object BoardAskSerializer : JsonTransformingSerializer<Ask>(Ask.serializer()) {
     override fun transformDeserialize(element: JsonElement): JsonElement {
         if (element !is JsonObject) return element
         val kind = runCatching { element["kind"]?.jsonPrimitive?.content }.getOrNull()
-        if (kind != "sudo" || "sudo" in element) return element
-        return JsonObject(element + ("sudo" to element))
+        if ((kind != "sudo" && kind != "secret") || kind in element) return element
+        return JsonObject(element + (kind to element))
     }
 
     override fun transformSerialize(element: JsonElement): JsonElement =
-        if (element is JsonObject) JsonObject(element - "sudo") else element
+        if (element is JsonObject) JsonObject(element - "sudo" - "secret") else element
 }
