@@ -68,6 +68,7 @@ import com.twentygx.tgxcode.ui.common.EmptyState
 import com.twentygx.tgxcode.ui.common.prLookOf
 import com.twentygx.tgxcode.ui.common.prTint
 import com.twentygx.tgxcode.ui.conversation.modeLabel
+import com.twentygx.tgxcode.ui.markdown.MarkdownInline
 import com.twentygx.tgxcode.ui.markdown.MarkdownText
 import com.twentygx.tgxcode.ui.needs.SectionHeader
 import com.twentygx.tgxcode.ui.theme.Metrics
@@ -254,11 +255,17 @@ private fun Head(payload: OrchestratorPayload, quota: List<QuotaWindow>, actions
     ) {
         Row(verticalAlignment = Alignment.Top) {
             val goal = payload.summary?.goal?.takeIf { it.isNotBlank() }
-            Text(
-                goal ?: "No goal yet — the orchestrator sets one when it writes its brief.",
-                style = if (goal != null) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
-                color = if (goal != null) MaterialTheme.colorScheme.onSurface else tgx.textMuted,
-                modifier = Modifier.weight(1f).padding(top = 10.dp),
+            val goalModifier = Modifier.weight(1f).padding(top = 10.dp)
+            if (goal != null) MarkdownInline(
+                goal,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = goalModifier,
+            ) else Text(
+                "No goal yet — the orchestrator sets one when it writes its brief.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = tgx.textMuted,
+                modifier = goalModifier,
             )
             IconButton(onClick = actions.onOpenSettings) {
                 Icon(Icons.Default.Settings, contentDescription = "This orchestrator's settings", tint = tgx.textMuted)
@@ -428,7 +435,7 @@ private fun DecisionBody(
     actions: OrchestratorActions,
 ) {
     val colors = tgx
-    Text(d.text, style = MaterialTheme.typography.bodyMedium)
+    MarkdownInline(d.text, style = MaterialTheme.typography.bodyMedium)
     if (d.answeredAt != null) {
         Text(
             "You answered “${clip(d.answer.orEmpty(), 80)}” ${agoWords(d.answeredAt, now)} — " +
