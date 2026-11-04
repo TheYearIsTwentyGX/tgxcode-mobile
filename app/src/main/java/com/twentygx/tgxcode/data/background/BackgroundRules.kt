@@ -39,6 +39,81 @@ object BackgroundRules {
     fun nextAttempt(attempt: Int, sawHello: Boolean, buffered: Boolean, sawOpen: Boolean): Int =
         if (sawHello || (buffered && sawOpen)) 0 else attempt + 1
 
+    // ------------------------------------------------- does this network stream?
+
+    /**
+     * What the stream has just shown about whether this transport carries it.
+     *
+     * Each is something that *happened*, so [verdictAfter] can say what it proves. The
+     * ones that prove nothing are listed too, because "a slow connect is not evidence"
+     * is the rule this was written to pin.
+     */
+    enum class Evidence(val reason: String) {
+        /** The response opened and [BridgeRepository.HELLO_GRACE_MILLIS] passed with no `hello`. The only proof of buffering. */
+        OpenedWithoutHello("response opened but no hello within the grace period"),
+
+        /** `hello` came promptly after the response opened: the transport streams. */
+        HelloPrompt("hello arrived promptly"),
+
+        /** `hello` came, but only after the grace period: a proxy flushing late is still a proxy buffering. */
+        HelloLate("hello arrived late"),
+
+        /** DNS, TCP, TLS or the radio were slow, or the connect failed. About the connection, not the stream. */
+        ConnectSlowOrFailed("connect was slow or failed"),
+
+        /** A different bridge is a different question. */
+        OriginChanged("the origin changed"),
+
+        /** Wi-Fi to cellular and so on: the old verdict was about the old network. */
+        NetworkChanged("the network changed"),
+
+        /** A stale stream cut, or Settings' Reconnect: someone wants a fresh look. */
+        Reconnect("reconnecting on request"),
+
+        /** Back on screen after who-knows-how-long: whatever was true then may not be now. */
+        Foreground("the app came to the foreground"),
+
+        /** Scheduled re-test of a network that has been buffering for a while. */
+        Reprobe("periodic re-test"),
+    }
+
+    /**
+     * The new "this network buffers the stream" verdict.
+     *
+     * Only one thing sets it: a response that opened and then said nothing. Everything
+     * that merely says the connect was slow or failed leaves it alone — it used to set it,
+     * which is how a phone waking its radio got a banner and polling until the process
+     * died. Everything that shows a stream working, or that makes the old verdict stale,
+     * clears it.
+     */
+    fun verdictAfter(buffered: Boolean, evidence: Evidence): Boolean = when (evidence) {
+        Evidence.OpenedWithoutHello -> true
+        Evidence.HelloLate, Evidence.ConnectSlowOrFailed -> buffered
+        Evidence.HelloPrompt, Evidence.OriginChanged, Evidence.NetworkChanged,
+        Evidence.Foreground, Evidence.Reprobe, Evidence.Reconnect,
+        -> false
+    }
+
+    /** Whether a `hello` [sinceOpenMillis] after the response opened shows the stream works. */
+    fun helloEvidence(sinceOpenMillis: Long, graceMillis: Long): Evidence =
+        if (sinceOpenMillis <= graceMillis) Evidence.HelloPrompt else Evidence.HelloLate
+
+    /**
+     * Whether the app coming back on screen is a reason to retry the stream. Only for a
+     * phone that has given up on it: a live stream is not worth dropping for a resume.
+     */
+    fun retryOnForeground(buffered: Boolean): Boolean = buffered
+
+    /**
+     * How long a held socket may sit before the network is re-tested, after [failures]
+     * re-tests in a row found it still buffering. A socket held with no read timeout
+     * would otherwise never be tried again; this doubles from [base] up to
+     * [MAX_REPROBE_MILLIS], so a network that really buffers costs a few reconnects an
+     * hour rather than a few a minute.
+     */
+    fun reprobeDelayMillis(base: Long, failures: Int): Long =
+        minOf(MAX_REPROBE_MILLIS, base * (1L shl minOf(failures.coerceAtLeast(0), 6)))
+
     /**
      * Whether a change of default network is worth dropping the stream for.
      *
@@ -277,6 +352,9 @@ object BackgroundRules {
     const val STALE_AFTER_MILLIS = 80_000L
 
     const val MAX_BACKOFF_MILLIS = 30_000L
+
+    /** The longest a buffering network goes without being re-tested. */
+    const val MAX_REPROBE_MILLIS = 30 * 60_000L
 
     const val WAKE_DURING_OUTAGE_MILLIS = 2 * 60_000L
 

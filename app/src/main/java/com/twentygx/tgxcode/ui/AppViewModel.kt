@@ -257,6 +257,7 @@ class AppViewModel(
     fun onStart() {
         uiStarted = true
         syncLease()
+        repo.onForeground()
     }
 
     fun onStop() {

@@ -180,6 +180,7 @@ class BridgeRepository(
      */
     private val helloGraceMillis: Long = HELLO_GRACE_MILLIS,
     private val pollMillis: Long = POLL_MILLIS,
+    private val reprobeMillis: Long = REPROBE_MILLIS,
 ) {
     private val _connection = MutableStateFlow(ConnState.Unconfigured)
     val connection: StateFlow<ConnState> = _connection.asStateFlow()
@@ -336,15 +337,19 @@ class BridgeRepository(
     private var streamJob: Job? = null
 
     /**
-     * Set once this transport is known to buffer the stream, and then left alone.
+     * The verdict that this transport buffers the stream, i.e. a response opened and
+     * `hello` did not follow.
      *
-     * Sticky for the same reason `poll.on` is in `web/mobile.js`: having established
-     * that this network eats streams, re-litigating it on every lease cycle costs six
-     * seconds of blank board each time. Cleared only by [onOriginChanged], because a
-     * *different* origin is genuinely a different question — which is one better than
-     * the web client, where only a page reload clears it.
+     * Not permanent. It is set by exactly one thing ([BackgroundRules.Evidence.OpenedWithoutHello])
+     * and cleared by anything that shows a stream working or makes the old verdict stale:
+     * `hello` arriving promptly, a network change, the app returning to the foreground,
+     * an origin change, and a periodic re-test while held. A slow or failed *connect* is
+     * never evidence — only [setVerdict] writes this, and it logs why.
      */
     private var buffered = false
+
+    /** Re-tests in a row that found the network still buffering; spaces out the next. */
+    private var reprobeFailures = 0
     private var pollJob: Job? = null
 
     private val lock = Mutex()
@@ -370,7 +375,8 @@ class BridgeRepository(
         const val CREATION_GRACE_MILLIS = 45_000L
 
         /**
-         * How long to wait for `hello` before concluding the stream will never work.
+         * How long to wait for `hello`, counted from the response opening (not from
+         * asking for the socket), before concluding this transport buffers the stream.
          *
          * The bridge writes it before the ping timer exists, so on any transport that
          * works at all it lands in well under a second — 0.04s on loopback, 0.29s
@@ -381,6 +387,14 @@ class BridgeRepository(
 
         /** How often to poll, once polling. Fast enough that answering an ask feels immediate. */
         const val POLL_MILLIS = 2_500L
+
+        /**
+         * How long a held socket is left alone before the network is re-tested, doubling
+         * on each failed re-test up to [BackgroundRules.MAX_REPROBE_MILLIS]. A held
+         * socket has no read timeout, so without this a verdict reached on a bad minute
+         * would stand until the network changed.
+         */
+        const val REPROBE_MILLIS = 2 * 60_000L
 
         /** The board is ~7KB and a transcript delta is 42 bytes; they do not deserve the same rate. */
         const val BOARD_EVERY = 2
@@ -465,15 +479,32 @@ class BridgeRepository(
     }
 
     /**
-     * Forget what we learned about the last transport.
-     *
-     * Called when the origin changes, and only then. A phone that fell back to polling
-     * on a bad tunnel and then moved to a good one should get its stream back, and the
-     * origin changing is the one moment at which "this network eats streams" stops
-     * being evidence about anything.
+     * Change [buffered], saying why. The only writer, so a bug report that quotes the
+     * log can name the evidence behind every flip.
+     */
+    private fun setVerdict(evidence: BackgroundRules.Evidence) {
+        val next = BackgroundRules.verdictAfter(buffered, evidence)
+        if (next == buffered) return
+        buffered = next
+        Tgx.w("stream verdict: ${if (next) "buffered" else "streams"} — ${evidence.reason}")
+    }
+
+    /**
+     * Forget what we learned about the last transport: a different origin is a
+     * different question. Called before [reconnect] when the settings change.
      */
     fun onOriginChanged() {
-        buffered = false
+        reprobeFailures = 0
+        setVerdict(BackgroundRules.Evidence.OriginChanged)
+    }
+
+    /**
+     * The app is on screen again. A phone that gave up on the stream (and may have done
+     * so on a bad minute hours ago) tries it again; one with a live stream is left alone.
+     */
+    fun onForeground() {
+        if (!BackgroundRules.retryOnForeground(buffered)) return
+        reconnect(BackgroundRules.Evidence.Foreground)
     }
 
     /**
@@ -483,13 +514,22 @@ class BridgeRepository(
      * the point of it — so a corrected token or service token needs something to start
      * it again, and the service's lease means the lease count may never reach zero to
      * do it the ordinary way.
+     *
+     * With an [evidence] (a network change, the app returning to the foreground) the
+     * verdict is re-opened too and **polling is left running** until the new stream says
+     * `hello`, so a network that really does buffer goes back to polling without the
+     * banner and the data flickering off for six seconds in between.
      */
-    fun reconnect() {
+    fun reconnect(evidence: BackgroundRules.Evidence? = null) {
         scope.launch {
             lock.withLock {
+                if (evidence != null) {
+                    reprobeFailures = 0
+                    setVerdict(evidence)
+                }
                 streamJob?.cancel()
                 streamJob = null
-                stopPolling()
+                if (evidence == null) stopPolling()
                 clientId = null
                 if (leases > 0 && !_connection.value.isRefused) startStream()
             }
@@ -512,25 +552,92 @@ class BridgeRepository(
                     // The socket is opened for the bridge's benefit, not ours. Get the
                     // poll running first so the screen has data while it connects.
                     startPolling()
-                } else {
+                } else if (!polling) {
+                    // Not while a poll is still running (a re-test, or a retry after a
+                    // network change): it owns the state until `hello` says otherwise,
+                    // and Connecting would flash the banner away and back.
                     _connection.value = ConnState.Connecting
                 }
                 Tgx.d("opening /api/events (attempt $attempt, held=$held)")
                 var sawHello = false
                 var sawOpen = false
 
+                // Set when this run is ended on purpose (a verdict changed): reopen at
+                // once on the right client, with no backoff.
+                var deliberate = false
+
                 coroutineScope {
-                    val collector = launch {
+                    val run = this
+                    var collector: Job? = null
+                    var timer: Job? = null
+                    var openedAt = 0L
+
+                    collector = launch {
                         sse.stream(held = held).collect { signal ->
                             when (signal) {
-                                is SseSignal.Open -> sawOpen = true
+                                is SseSignal.Open -> {
+                                    sawOpen = true
+                                    openedAt = System.nanoTime()
+                                    // The clock starts here, not when the socket was
+                                    // asked for. Before this it was counting DNS, TCP,
+                                    // TLS and a radio waking up, none of which is the
+                                    // network buffering. `hello` is written before
+                                    // anything else, so past this point silence is.
+                                    timer = run.launch {
+                                        if (held) {
+                                            // A held socket never times out, so it has
+                                            // to be re-tested on a schedule or the
+                                            // verdict could never be revisited.
+                                            delay(BackgroundRules.reprobeDelayMillis(reprobeMillis, reprobeFailures))
+                                            deliberate = true
+                                            setVerdict(BackgroundRules.Evidence.Reprobe)
+                                        } else {
+                                            delay(helloGraceMillis)
+                                            if (sawHello) return@launch
+                                            deliberate = true
+                                            reprobeFailures++
+                                            setVerdict(BackgroundRules.Evidence.OpenedWithoutHello)
+                                            startPolling()
+                                        }
+                                        // Cancel the collection only — never this scope,
+                                        // which `coroutineScope` would rethrow, taking the
+                                        // whole retry loop with it. Falling through
+                                        // reopens on the client the new verdict calls for.
+                                        collector?.cancel()
+                                    }
+                                }
                                 is SseSignal.Message -> {
-                                    if (signal.event is StreamEvent.Hello) sawHello = true
+                                    if (signal.event is StreamEvent.Hello) {
+                                        sawHello = true
+                                        val sinceOpen = (System.nanoTime() - openedAt) / 1_000_000
+                                        val evidence = BackgroundRules.helloEvidence(sinceOpen, helloGraceMillis)
+                                        timer?.cancel()
+                                        if (held && evidence == BackgroundRules.Evidence.HelloPrompt) {
+                                            // Proof the transport streams, on a socket that
+                                            // has no dead-peer detection. Heal: reopen on
+                                            // the normal client, whose own `hello` does the
+                                            // resync — handling this one too would run it
+                                            // twice.
+                                            reprobeFailures = 0
+                                            setVerdict(evidence)
+                                            deliberate = true
+                                            collector?.cancel()
+                                            return@collect
+                                        }
+                                        setVerdict(evidence)
+                                        if (!held) {
+                                            // Live now: whatever polling was covering
+                                            // for the stream is done.
+                                            reprobeFailures = 0
+                                            stopPolling()
+                                        }
+                                    }
                                     handle(signal.event)
                                     _events.emit(signal.event)
                                 }
                                 is SseSignal.Closed -> {
                                     Tgx.w("stream closed: http=${signal.httpStatus}", signal.cause)
+                                    timer?.cancel()
                                     // Before the 401 check: strict Access answers 401
                                     // too, and that one is not about pairing. Terminal
                                     // like NotPaired, so the app cannot sit on a
@@ -545,47 +652,27 @@ class BridgeRepository(
                                         _connection.value = ConnState.NotPaired
                                         return@collect
                                     }
-                                    // Polling owns the state in buffered mode: the
+                                    // Polling owns the state while it is running: the
                                     // socket dropping is worth reconnecting, not worth
                                     // telling the user the app is offline while it
-                                    // still works.
-                                    if (!buffered) _connection.value = ConnState.Offline
+                                    // still works. And a failed connect is Offline and a
+                                    // backoff, never a verdict about the network.
+                                    if (!polling) _connection.value = ConnState.Offline
                                 }
                             }
                         }
                     }
 
-                    // The watchdog. `hello` is the only thing that distinguishes a
-                    // healthy idle stream from one a proxy is swallowing, so the
-                    // decision is made once, up front, on a timer — never by watching
-                    // for silence later.
-                    val watchdog = if (held) {
-                        null
-                    } else {
-                        launch {
-                            delay(helloGraceMillis)
-                            if (sawHello) return@launch
-                            Tgx.w(
-                                "no hello in ${helloGraceMillis}ms — this transport is " +
-                                    "buffering the stream; polling instead",
-                            )
-                            buffered = true
-                            startPolling()
-                            // Cancel the collection only — never this scope, which
-                            // `coroutineScope` would rethrow, taking the whole retry
-                            // loop with it. Dropping the collector falls through to the
-                            // top of the loop, which reopens on `heldStream`: the same
-                            // socket with its read timeout off, so it survives being
-                            // sent nothing at all.
-                            collector.cancel()
-                        }
-                    }
-
-                    collector.join()
-                    watchdog?.cancel()
+                    collector?.join()
+                    timer?.cancel()
                 }
 
                 if (_connection.value.isRefused) return@launch
+
+                if (deliberate) {
+                    attempt = 0
+                    continue
+                }
 
                 // A clean run that got as far as `hello` starts its backoff over —
                 // an hour-long connection dropping once should reconnect instantly,
@@ -649,6 +736,8 @@ class BridgeRepository(
         pollJob?.cancel()
         pollJob = null
     }
+
+    private val polling: Boolean get() = pollJob?.isActive == true
 
     /**
      * One round of "what changed", using only ordinary GETs.
@@ -741,7 +830,9 @@ class BridgeRepository(
      * again on success is what heals the state if anything else ever does.
      */
     private fun stillPolling() {
-        if (!_connection.value.isRefused) _connection.value = ConnState.Polling
+        // Only while the poll is still wanted: a round that was in flight when `hello`
+        // stopped it must not write Polling over the Live that `hello` just set.
+        if (polling && !_connection.value.isRefused) _connection.value = ConnState.Polling
     }
 
     /**

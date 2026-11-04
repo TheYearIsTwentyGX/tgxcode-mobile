@@ -349,7 +349,20 @@ fun TgxCodeRoot(
                 // Degraded outranks remote rather than stacking with it: polling only
                 // happens remotely, so the two would say overlapping things, and only one
                 // banner may exist (see below).
-                val degraded = connection == ConnState.Polling
+                //
+                // And only once polling has lasted a moment: a stream that is being
+                // re-tried after a network change or a late `hello` goes Polling → Live
+                // in well under a second, and a banner for that is just a flicker.
+                val polling = connection == ConnState.Polling
+                var degraded by remember { mutableStateOf(false) }
+                LaunchedEffect(polling) {
+                    if (polling) {
+                        kotlinx.coroutines.delay(DEGRADED_BANNER_DELAY_MILLIS)
+                        degraded = true
+                    } else {
+                        degraded = false
+                    }
+                }
                 val banner = degraded || remote
                 Column {
                     // Whichever element is on top owns the status-bar inset, and only
@@ -1014,3 +1027,6 @@ private fun androidx.navigation.NavHostController.navigateTab(route: Any) {
         restoreState = true
     }
 }
+
+/** How long the connection must stay Polling before the "no live stream" banner shows. */
+private const val DEGRADED_BANNER_DELAY_MILLIS = 3_000L

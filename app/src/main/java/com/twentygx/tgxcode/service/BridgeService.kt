@@ -168,7 +168,7 @@ class BridgeService : Service() {
                     } else {
                         "Checking every few seconds"
                     },
-                    "This network will not carry a live stream",
+                    "Live stream isn't getting through on this network",
                 )
                 ConnState.NotPaired -> AskNotifications.ServiceState(
                     "Not paired",
