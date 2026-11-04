@@ -53,7 +53,8 @@ sealed interface SseSignal {
  *
  * `hello` is the only signal that separates them, and the bridge writes it before the
  * ping timer exists — 0.04s on loopback, 0.29s through a named tunnel. So the caller
- * decides once, up front, on a timeout: see `HELLO_GRACE_MILLIS` in
+ * decides on a timeout that starts when [SseSignal.Open] arrives, and revisits the
+ * verdict whenever the network changes or a `hello` shows up: see `HELLO_GRACE_MILLIS` in
  * `BridgeRepository`. Having decided, it keeps collecting from [stream] with
  * `held = true` rather than cancelling, because the socket is what keeps this client
  * a viewer.

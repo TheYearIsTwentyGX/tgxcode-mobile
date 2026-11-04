@@ -166,9 +166,9 @@ class BackgroundHealth(
     }
 
     /** Settings' "Reconnect": a fresh socket on whatever network there is now. */
-    fun reconnectNow() {
+    fun reconnectNow(evidence: BackgroundRules.Evidence = BackgroundRules.Evidence.Reconnect) {
         onNetworkChanged()
-        repo.reconnect()
+        repo.reconnect(evidence)
     }
 
     /** Settings' "Run now". */
@@ -286,7 +286,7 @@ class BackgroundHealth(
                 current = next
                 if (reconnect) {
                     Tgx.d("default network changed — reconnecting")
-                    reconnectNow()
+                    reconnectNow(BackgroundRules.Evidence.NetworkChanged)
                 }
             }
 

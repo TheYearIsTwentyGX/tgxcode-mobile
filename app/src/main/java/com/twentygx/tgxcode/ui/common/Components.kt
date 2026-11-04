@@ -221,7 +221,7 @@ fun DegradedBanner(modifier: Modifier = Modifier) {
     ) {
         Box(Modifier.size(7.dp).border(2.dp, MaterialTheme.colorScheme.primary, CircleShape))
         Text(
-            "This network will not carry a live stream — checking every few seconds",
+            "Live stream isn't getting through — checking every few seconds",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 8.dp),
